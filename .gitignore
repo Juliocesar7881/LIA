@@ -1,0 +1,21 @@
+# Ambiente Virtual
+.venv/
+venv/
+
+# Arquivo de segredos
+.env
+
+# Arquivos de cache do Python
+__pycache__/
+*.pyc
+
+# Arquivos gerados pela LISA
+fala_*.mp3
+lisa_logs.txt
+codigo_gerado.py
+
+# Arquivos do PyCharm
+.idea/
+
+# Arquivos executáveis grandes
+*.exe

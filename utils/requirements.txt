@@ -1,0 +1,11 @@
+speechrecognition
+pyautogui
+pyaudio
+opencv-python
+pytesseract
+pillow
+edge_tts
+playsound==1.2.2
+python-dotenv
+openai
+pydub simpleaudio
