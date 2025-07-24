@@ -1,36 +1,40 @@
-# transcriber.py (versão simplificada)
+# transcriber.py (versão com retorno de sinal)
 
 import os
 import pyperclip
-from gpt_bridge import client
+import whisper
+
+print("Carregando modelo de transcrição Whisper (pode demorar na primeira vez)...")
+try:
+    model = whisper.load_model("base")
+    print("✅ Modelo Whisper carregado com sucesso.")
+except Exception as e:
+    print(f"❌ Erro ao carregar o modelo Whisper: {e}")
+    model = None
 
 
 def transcrever_audio_copiado():
     """
-    Pega o caminho JÁ LIMPO da área de transferência e transcreve o áudio.
+    Transcreve o áudio e retorna um tuple: (sucesso, mensagem/nome_do_arquivo).
     """
-    try:
-        caminho_arquivo = pyperclip.paste()
+    if not model:
+        return (False, "Erro: O modelo de transcrição não pôde ser carregado.")
 
-        # A limpeza de aspas não é mais necessária aqui
+    try:
+        caminho_arquivo = pyperclip.paste().strip()
         if not os.path.exists(caminho_arquivo):
             print(f"❌ Erro: O caminho '{caminho_arquivo}' não foi encontrado.")
-            return "Erro: o arquivo copiado não foi encontrado. Tente copiar o caminho novamente."
+            return (False, "Erro: o arquivo copiado não foi encontrado.")
 
-        print(f"🎙️ Transcrevendo o arquivo: {caminho_arquivo}")
-
-        with open(caminho_arquivo, "rb") as audio_file:
-            transcricao = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
-
-        texto_transcrito = transcricao.text
-        print("✅ Transcrição concluída.")
+        print(f"🎙️ Transcrevendo o arquivo localmente: {caminho_arquivo}")
+        result = model.transcribe(caminho_arquivo)
+        texto_transcrito = result["text"]
+        print("✅ Transcrição local concluída.")
         pyperclip.copy(texto_transcrito)
 
-        return "Transcrição concluída e copiada para a sua área de transferência!"
+        # Retorna SUCESSO e o NOME do arquivo de áudio para a confirmação rápida
+        return (True, "OkTransscrito.mp3")
 
     except Exception as e:
-        print(f"🤯 Ocorreu um erro inesperado durante a transcrição: {e}")
-        return "Ocorreu um erro durante a transcrição. Verifique o console para mais detalhes."
+        print(f"🤯 Ocorreu um erro inesperado durante a transcrição local: {e}")
+        return (False, "Ocorreu um erro durante a transcrição.")
