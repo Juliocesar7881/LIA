@@ -6,11 +6,11 @@ import os
 
 # Dicionário com os nomes dos arquivos e os textos correspondentes
 respostas_para_cache = {
-    "Sim": "Sim!",
-    "Claro": "Claro!",
-    "Beleza": "Beleza!",
-    "Feito": "Feito!",
-    "Ok": "Ok.",
+    "Sim": "Sim.",
+    "Claro": "Claro.",
+    "Beleza": "Beleza.",
+    "Feito": "Feito.",
+    "Ok": "Ok!",
     "Fechado": "Fechado.",
     "OkTransscrito": "Ok, transcrito para sua area de transferencia."
 }
