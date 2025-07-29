@@ -1,4 +1,4 @@
-# main.py (Com máxima flexibilidade de comandos)
+# main.py (Com comandos de visão expandidos)
 
 import asyncio
 import pyperclip
@@ -22,9 +22,9 @@ from screen_control import (
     tirar_print
 )
 from utils.tools import encontrar_e_abrir_pasta
-from transcriber import transcrever_audio_copiado
+from transcriber import transcrever_audio_copiado, extrair_caminho_do_clipboard
 from utils.vision import clicar_em_palavra
-from gpt_bridge import perguntar_ao_gpt
+from gpt_bridge import perguntar_ao_gpt, descrever_imagem
 from memory import registrar_evento
 
 # --- Configurações e Funções Auxiliares (sem alterações) ---
@@ -63,7 +63,7 @@ async def cancelar_desligamento():
     await falar("Cancelado.")
 
 
-# --- Processador de Comandos (COM MÁXIMA FLEXIBILIDADE) ---
+# --- Processador de Comandos ---
 async def processar_comando(comando):
     global ativada;
     comando = comando.strip().lower()
@@ -76,15 +76,13 @@ async def processar_comando(comando):
     if any(palavra in comando for palavra in palavras_de_interrupcao):
         registrar_evento("Comando de silêncio.");
         return
-    if comando in ["desliga", "dormir", "fim"]:
+    if comando in ["desliga", "dormir", "fim", "desativar", "desativa", "desative"]:
         ativada = False;
         await falar("Até mais.");
         registrar_evento("Assistente desativada.");
         return
 
-    # --- Comandos com Variações Expandidas ---
-
-    # Desligar PC
+    # Comandos com Variações Expandidas
     gatilhos_desligar = ["desligar pc", "desligar o computador", "desligar máquina", "desligue o pc",
                          "desligue o computador", "encerrar o sistema", "encerrar", "shutdown"]
     if any(gatilho in comando for gatilho in gatilhos_desligar) and "programar" not in comando:
@@ -92,7 +90,6 @@ async def processar_comando(comando):
         os.system("shutdown -s -t 1");
         return
 
-    # Reiniciar PC
     gatilhos_reiniciar = ["reiniciar pc", "reiniciar o computador", "reiniciar máquina", "reinicie o pc",
                           "reinicie o computador", "reboot", "recomeçar"]
     if any(gatilho in comando for gatilho in gatilhos_reiniciar) and "programar" not in comando:
@@ -100,7 +97,6 @@ async def processar_comando(comando):
         os.system("shutdown -r -t 1");
         return
 
-    # Programar Desligamento/Reinício (já é flexível pela extração de tempo)
     tempo_especifico = extrair_tempo_especifico_em_segundos(comando)
     tempo_duracao = extrair_tempo_duracao_em_segundos(comando)
     if tempo_especifico or tempo_duracao:
@@ -114,20 +110,51 @@ async def processar_comando(comando):
             await falar("Ok, desligamento agendado.");
             return
 
-    # Cancelar Agendamento
     gatilhos_cancelar = ["cancelar desligamento", "cancelar o desligamento", "cancelar reinicialização",
                          "cancelar agendamento", "não desligar mais", "parar desligamento", "não quero mais desligar"]
     if any(gatilho in comando for gatilho in gatilhos_cancelar):
         await cancelar_desligamento();
         return
 
-    # Tirar Print
     gatilhos_print = ["tirar print", "tira print", "printar a tela", "printa a tela", "print", "capturar tela",
                       "captura de tela", "faz um print", "bater um print", "fotografar a tela"]
     if any(gatilho in comando for gatilho in gatilhos_print):
         if tirar_print(): falar_rapido("Feito.mp3"); return
 
-    # Transcrição (já era flexível)
+    # --- INÍCIO DA ATUALIZAÇÃO DOS GATILHOS DE VISÃO ---
+    gatilhos_descrever_tela = [
+        "descreva a tela", "o que você vê", "descreve o que você tá vendo", "analisar a tela", "o que tem na tela",
+        "o que está na tela", "leia a tela", "lê a tela pra mim", "o que é isso", "descreve isso pra mim",
+        "o que tá rolando aí", "me diz o que tem aí"
+    ]
+    if any(gatilho in comando for gatilho in gatilhos_descrever_tela):
+        await falar("Ok, um momento...")
+        caminho_do_print = tirar_print()
+        if caminho_do_print:
+            prompt = "Descreva de forma concisa o que está visível nesta imagem da tela de um computador."
+            descricao = descrever_imagem(caminho_do_print, prompt)
+            await falar(descricao)
+        else:
+            await falar("Desculpe, falhei ao tirar o print para analisar.")
+        return
+
+    gatilhos_descrever_imagem = [
+        "descreva essa imagem", "descreva a imagem", "o que é essa imagem", "analisar imagem",
+        "descreva a imagem copiada", "analise o que eu copiei", "o que é isso que eu copiei", "descreve a foto",
+        "me diga o que é essa foto", "e essa imagem", "identifique a imagem"
+    ]
+    if any(gatilho in comando for gatilho in gatilhos_descrever_imagem):
+        await falar("Certo, vou analisar a imagem copiada.")
+        caminho_da_imagem = extrair_caminho_do_clipboard()
+        if caminho_da_imagem:
+            prompt = "O que é esta imagem? Descreva-a para mim de forma concisa."
+            descricao = descrever_imagem(caminho_da_imagem, prompt)
+            await falar(descricao)
+        else:
+            await falar("Não encontrei um caminho de imagem válido. Copie o arquivo da imagem e tente de novo.")
+        return
+    # --- FIM DA ATUALIZAÇÃO DOS GATILHOS DE VISÃO ---
+
     if comando.startswith("transcrever"):
         falar_rapido(random.choice(CONFIRMACOES_GERAIS));
         texto_transcrito = None
@@ -147,7 +174,6 @@ async def processar_comando(comando):
             await falar(texto_transcrito or "Falha na transcrição.")
         return
 
-    # Comandos que iniciam com gatilhos
     gatilhos_fechar = ["fechar", "fecha", "feche","mate","mata"]
     for gatilho in gatilhos_fechar:
         if comando.startswith(gatilho):
@@ -166,7 +192,18 @@ async def processar_comando(comando):
             else:
                 await falar("Não encontrei."); return
 
-    # Comandos exatos ou contidos na frase
+    gatilhos_enviar = ["enviar", "envie", "mandar", "manda", "confirmar", "confirme", "envia", "mande", "confirma"]
+    if comando in gatilhos_enviar:
+        apertar_tecla('enter')
+        falar_rapido(random.choice(CONFIRMACOES_GERAIS))
+        return
+
+    gatilhos_selecionar_tudo = ["selecionar tudo", "seleciona tudo", "selecione tudo", "selecionar todos", "seleciona todos", "ctrl a"]
+    if any(gatilho in comando for gatilho in gatilhos_selecionar_tudo):
+        apertar_tecla('ctrl+a')
+        falar_rapido(random.choice(CONFIRMACOES_GERAIS))
+        return
+
     if any(palavra in comando for palavra in ["desfazer", "desfaz", "desfaça", "ctrl z", "voltar", "voltar uma vez","volta uma vez","volta uma ação"]):
         apertar_tecla('ctrl+z');
         falar_rapido(random.choice(CONFIRMACOES_GERAIS));
@@ -182,7 +219,6 @@ async def processar_comando(comando):
         falar_rapido(random.choice(CONFIRMACOES_GERAIS));
         return
 
-    # Comandos mais complexos que precisam de um argumento
     gatilhos_clique = ["clicar em", "clica em", "clique em", "clicar no", "clica no", "clicar na", "clica na", "clicar",
                        "clica", "clique"]
     for gatilho in gatilhos_clique:
@@ -214,7 +250,6 @@ async def processar_comando(comando):
             tecla = comando.replace(gatilho, "", 1).strip();
             if tecla: apertar_tecla(tecla); return
 
-    # Rolar tela (MUITO AMPLIADO)
     gatilhos_rolar_cima = ["rolar para cima", "sobe", "subir", "rola pra cima", "navegar para cima", "vai pra cima",
                            "sobe a página", "página pra cima", "scroll pra cima", "pra cima", "cima"]
     gatilhos_rolar_baixo = ["rolar para baixo", "desce", "descer", "rola pra baixo", "navegar para baixo",
