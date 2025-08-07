@@ -1,4 +1,4 @@
-# main.py (Com comandos de visão expandidos)
+# main.py (Versão 100% completa com todas as funcionalidades)
 
 import asyncio
 import pyperclip
@@ -19,17 +19,22 @@ from screen_control import (
     copiar_caminho_selecionado,
     colar,
     fechar_janela_por_nome,
-    tirar_print
+    tirar_print,
+    abrir_nova_aba,
+    fechar_anuncio_na_tela,
+    fechar_aba_por_nome
 )
-from utils.tools import encontrar_e_abrir_pasta
+from utils.tools import encontrar_e_abrir_pasta, obter_cotacao_acao, obter_noticias_do_dia
 from transcriber import transcrever_audio_copiado, extrair_caminho_do_clipboard
 from utils.vision import clicar_em_palavra
 from gpt_bridge import perguntar_ao_gpt, descrever_imagem
 from memory import registrar_evento
+from whatsapp_bot import enviar_mensagem_por_voz
 
-# --- Configurações e Funções Auxiliares (sem alterações) ---
+# --- Configurações e Funções Auxiliares ---
 ativada = False
 loop_principal = None
+estado_conversa = {}  # <-- "Memória" de curto prazo da LISA
 CONFIRMACOES_GERAIS = ["Ok.mp3", "Feito.mp3", "Sim.mp3", "Claro.mp3", "Beleza.mp3"]
 CONFIRMACOES_ACAO = ["Ok.mp3", "Fechado.mp3"]
 
@@ -65,8 +70,23 @@ async def cancelar_desligamento():
 
 # --- Processador de Comandos ---
 async def processar_comando(comando):
-    global ativada;
+    global ativada, estado_conversa
     comando = comando.strip().lower()
+
+    # --- LÓGICA DE CONVERSA ---
+    if estado_conversa.get('acao') == 'aguardando_confirmacao_desligar':
+        if "computador" in comando or "pc" in comando:
+            await falar("Ok, desligando o computador.")
+            os.system("shutdown -s -t 1")
+        elif "lisa" in comando or "assistente" in comando or "você" in comando:
+            ativada = False
+            await falar("Até mais.")
+        else:
+            await falar("Não entendi sua escolha. Operação cancelada.")
+
+        estado_conversa = {}  # Limpa o estado da conversa
+        return
+    # --- FIM DA LÓGICA DE CONVERSA ---
 
     palavras_de_interrupcao = [
         "cala a boca", "cala", "cale", "calada", "cale-se", "quieta", "quieto",
@@ -76,20 +96,65 @@ async def processar_comando(comando):
     if any(palavra in comando for palavra in palavras_de_interrupcao):
         registrar_evento("Comando de silêncio.");
         return
-    if comando in ["desliga", "dormir", "fim", "desativar", "desativa", "desative"]:
+
+    # --- LÓGICA DE DESLIGAMENTO (ATUALIZADA) ---
+    # Comandos diretos para desativar a assistente
+    if comando in ["dormir", "fim", "desativar", "desativa", "desative"]:
         ativada = False;
         await falar("Até mais.");
         registrar_evento("Assistente desativada.");
         return
 
-    # Comandos com Variações Expandidas
-    gatilhos_desligar = ["desligar pc", "desligar o computador", "desligar máquina", "desligue o pc",
-                         "desligue o computador", "encerrar o sistema", "encerrar", "shutdown"]
-    if any(gatilho in comando for gatilho in gatilhos_desligar) and "programar" not in comando:
+    # Comando ambíguo que inicia a conversa
+    if comando in ["desligar", "desliga"]:
+        estado_conversa = {'acao': 'aguardando_confirmacao_desligar'}
+        await falar("Você quer desligar a assistente ou o computador?")
+        return
+
+    # Comandos diretos para desligar o PC
+    gatilhos_desligar_pc = ["desligar pc", "desligar o computador", "desligar máquina", "desligue o pc",
+                            "desligue o computador", "encerrar o sistema", "encerrar", "shutdown"]
+    if any(gatilho in comando for gatilho in gatilhos_desligar_pc) and "programar" not in comando:
         await falar("Desligando.");
         os.system("shutdown -s -t 1");
         return
+    # --- FIM DA LÓGICA DE DESLIGAMENTO ---
 
+    # Comandos de Navegação
+    gatilhos_nova_aba = ["abrir nova aba", "abre uma nova aba", "nova aba", "nova guia", "abre nova guia"]
+    if any(gatilho in comando for gatilho in gatilhos_nova_aba):
+        if abrir_nova_aba():
+            falar_rapido(random.choice(CONFIRMACOES_GERAIS))
+        else:
+            await falar("Não consegui abrir uma nova aba.")
+        return
+
+    # Comandos de Informação em Tempo Real
+    gatilhos_noticias = ["quais as notícias", "me dê as notícias", "notícias de hoje", "manchetes do dia",
+                         "me atualize", "últimas notícias", "notícias do dia"]
+    if any(gatilho in comando for gatilho in gatilhos_noticias):
+        await falar("Buscando as últimas notícias...")
+        noticias = obter_noticias_do_dia()
+        await falar(noticias)
+        return
+
+    gatilhos_cotacao = [
+        "qual a cotação de", "quanto tá a ação da", "preço da ação da", "cotação da", "quanto custa a ação da",
+        "qual o valor de", "qual o valor do", "qual o valor da", "valor atual de", "valor atual do", "valor atual da",
+        "cotação do", "preço do", "preço da", "valor atual do"
+    ]
+    for gatilho in gatilhos_cotacao:
+        if comando.startswith(gatilho):
+            nome_ativo = comando.replace(gatilho, "", 1).strip()
+            if nome_ativo:
+                await falar(f"Buscando a cotação de {nome_ativo}, um momento...")
+                resultado = obter_cotacao_acao(nome_ativo)
+                await falar(resultado)
+            else:
+                await falar("Por favor, diga o nome do ativo que você quer saber.")
+            return
+
+    # Comandos de Sistema e Automação
     gatilhos_reiniciar = ["reiniciar pc", "reiniciar o computador", "reiniciar máquina", "reinicie o pc",
                           "reinicie o computador", "reboot", "recomeçar"]
     if any(gatilho in comando for gatilho in gatilhos_reiniciar) and "programar" not in comando:
@@ -121,7 +186,7 @@ async def processar_comando(comando):
     if any(gatilho in comando for gatilho in gatilhos_print):
         if tirar_print(): falar_rapido("Feito.mp3"); return
 
-    # --- INÍCIO DA ATUALIZAÇÃO DOS GATILHOS DE VISÃO ---
+    # Comandos de Visão
     gatilhos_descrever_tela = [
         "descreva a tela", "o que você vê", "descreve o que você tá vendo", "analisar a tela", "o que tem na tela",
         "o que está na tela", "leia a tela", "lê a tela pra mim", "o que é isso", "descreve isso pra mim",
@@ -153,7 +218,37 @@ async def processar_comando(comando):
         else:
             await falar("Não encontrei um caminho de imagem válido. Copie o arquivo da imagem e tente de novo.")
         return
-    # --- FIM DA ATUALIZAÇÃO DOS GATILHOS DE VISÃO ---
+
+    gatilhos_fechar_anuncio = ["fechar anúncio", "fecha o anúncio", "fecha esse anúncio", "clica no x",
+                               "tira esse anúncio", "fechar propaganda"]
+    if any(gatilho in comando for gatilho in gatilhos_fechar_anuncio):
+        if fechar_anuncio_na_tela():
+            falar_rapido(random.choice(CONFIRMACOES_ACAO))
+        else:
+            await falar("Não encontrei um anúncio para fechar.")
+        return
+
+    gatilhos_fechar_aba = ["fechar aba", "fecha a aba", "feche a aba"]
+    for gatilho in gatilhos_fechar_aba:
+        if comando.startswith(gatilho):
+            nome_da_aba = comando.replace(gatilho, "", 1).strip()
+            if nome_da_aba:
+                if fechar_aba_por_nome(nome_da_aba):
+                    falar_rapido(random.choice(CONFIRMACOES_ACAO))
+                else:
+                    await falar(f"Não encontrei a aba {nome_da_aba}.")
+            else:
+                await falar("Por favor, diga o nome da aba que devo fechar.")
+            return
+
+    gatilhos_whatsapp = [
+        "mande um zap para", "manda um zap para", "enviar um zap para",
+        "mande uma mensagem para", "manda uma mensagem para", "enviar uma mensagem para"
+    ]
+    if any(comando.startswith(gatilho) for gatilho in gatilhos_whatsapp):
+        resposta = await enviar_mensagem_por_voz(comando)
+        await falar(resposta)
+        return
 
     if comando.startswith("transcrever"):
         falar_rapido(random.choice(CONFIRMACOES_GERAIS));
@@ -174,40 +269,64 @@ async def processar_comando(comando):
             await falar(texto_transcrito or "Falha na transcrição.")
         return
 
-    gatilhos_fechar = ["fechar", "fecha", "feche","mate","mata"]
+    gatilhos_fechar = ["fechar", "fecha", "feche", "mate", "mata"]
     for gatilho in gatilhos_fechar:
         if comando.startswith(gatilho):
             alvo = comando.replace(gatilho, "", 1).strip();
             if alvo and fechar_janela_por_nome(alvo)[0]:
                 falar_rapido(random.choice(CONFIRMACOES_ACAO))
             else:
-                await falar("Não encontrei."); return
+                await falar("Não encontrei.");
+                return
 
-    gatilhos_abrir_pasta = ["abrir pasta", "abre a pasta", "abra a pasta", "procurar a pasta","busque a pasta","procure pasta","busque pasta","ir para pasta", "vai pra pasta", "procurar pasta","buscar pasta"]
+    gatilhos_abrir_pasta = ["abrir pasta", "abre a pasta", "abra a pasta", "procurar a pasta", "busque a pasta",
+                            "procure pasta", "busque pasta", "ir para pasta", "vai pra pasta", "procurar pasta",
+                            "buscar pasta"]
     for gatilho in gatilhos_abrir_pasta:
         if comando.startswith(gatilho):
             alvo = comando.replace(gatilho, "", 1).strip();
             if alvo and encontrar_e_abrir_pasta(alvo):
                 falar_rapido(random.choice(CONFIRMACOES_GERAIS))
             else:
-                await falar("Não encontrei."); return
+                await falar("Não encontrei.");
+                return
 
+    # Comandos de Ação Direta
     gatilhos_enviar = ["enviar", "envie", "mandar", "manda", "confirmar", "confirme", "envia", "mande", "confirma"]
     if comando in gatilhos_enviar:
         apertar_tecla('enter')
         falar_rapido(random.choice(CONFIRMACOES_GERAIS))
         return
 
-    gatilhos_selecionar_tudo = ["selecionar tudo", "seleciona tudo", "selecione tudo", "selecionar todos", "seleciona todos", "ctrl a"]
+    gatilhos_selecionar_tudo = ["selecionar tudo", "seleciona tudo", "selecione tudo", "selecionar todos",
+                                "seleciona todos", "ctrl a"]
     if any(gatilho in comando for gatilho in gatilhos_selecionar_tudo):
         apertar_tecla('ctrl+a')
         falar_rapido(random.choice(CONFIRMACOES_GERAIS))
         return
 
-    if any(palavra in comando for palavra in ["desfazer", "desfaz", "desfaça", "ctrl z", "voltar", "voltar uma vez","volta uma vez","volta uma ação"]):
+    if any(palavra in comando for palavra in
+           ["desfazer", "desfaz", "desfaça", "ctrl z", "voltar", "voltar uma vez", "volta uma vez", "volta uma ação"]):
         apertar_tecla('ctrl+z');
         falar_rapido(random.choice(CONFIRMACOES_GERAIS));
         return
+
+    gatilhos_copiar_arquivo = ["copiar arquivo", "copiar o arquivo", "copia o arquivo", "copia arquivo"]
+    for gatilho in gatilhos_copiar_arquivo:
+        if comando.startswith(gatilho):
+            nome_arquivo = comando.replace(gatilho, "", 1).strip()
+            if nome_arquivo:
+                await falar(f"Ok, tentando selecionar e copiar {nome_arquivo}...")
+                sucesso_clique, _, _ = clicar_em_palavra(nome_arquivo)
+                if not sucesso_clique:
+                    await falar("Não consegui encontrar esse arquivo na tela.")
+                    return
+            if copiar_arquivo_selecionado():
+                falar_rapido(random.choice(CONFIRMACOES_GERAIS))
+            else:
+                await falar("Falha ao copiar.")
+            return
+
     if any(gatilho in comando for gatilho in ["copiar caminho", "copiar o caminho", "copiar local", "copia o local"]):
         if copiar_caminho_selecionado(): await falar("Copiado."); return
     if comando in ["copiar", "copia", "copie", "ctrl c"]:
@@ -219,6 +338,7 @@ async def processar_comando(comando):
         falar_rapido(random.choice(CONFIRMACOES_GERAIS));
         return
 
+    # Comandos com Argumento
     gatilhos_clique = ["clicar em", "clica em", "clique em", "clicar no", "clica no", "clicar na", "clica na", "clicar",
                        "clica", "clique"]
     for gatilho in gatilhos_clique:
@@ -227,16 +347,20 @@ async def processar_comando(comando):
             if palavra_alvo and clicar_em_palavra(palavra_alvo)[0]:
                 pass
             else:
-                await falar("Não vi."); return
+                await falar("Não vi.");
+                return
 
-    gatilhos_abrir = ["abrir", "abra", "abre", "executar","executa", "execute", "iniciar", "inicia", "rodar", "rode","roda"]
+    gatilhos_abrir = ["abrir", "abra", "abre", "executar", "executa", "execute", "iniciar", "inicia", "rodar", "rode",
+                      "roda"]
     for gatilho in gatilhos_abrir:
         if comando.startswith(gatilho):
             argumento = comando[len(gatilho):].strip();
             if argumento and executar_acao_na_tela(argumento):
                 falar_rapido(random.choice(CONFIRMACOES_GERAIS))
+                return
             else:
-                await falar("Não achei."); return
+                await falar("Não achei.");
+                return
 
     gatilhos_digitar = ["digitar", "digita", "digite", "escrever", "escreve", "escreva"]
     for gatilho in gatilhos_digitar:
@@ -277,7 +401,7 @@ def callback_escuta(recognizer, audio):
             print("🎤 Interrompendo a fala atual para processar novo comando.")
             parar_fala()
             time.sleep(0.1)
-        if not ativada and any(x in frase for x in ["lisa", "lissa", "ativar"]):
+        if not ativada and any(x in frase for x in ["lisa", "lissa", "ativar", "ativa"]):
             ativada = True
             asyncio.run_coroutine_threadsafe(falar("Pois não?"), loop_principal)
         elif ativada:
@@ -298,7 +422,7 @@ async def main():
         await asyncio.sleep(1)
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

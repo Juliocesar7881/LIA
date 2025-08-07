@@ -1,4 +1,4 @@
-# voice_control.py (Com o "freio de mão" na função parar_fala)
+# voice_control.py (Com trava de segurança para a sensibilidade do microfone)
 
 import speech_recognition as sr
 import asyncio
@@ -8,6 +8,25 @@ import random
 import threading
 import pygame
 import re
+import time
+
+
+def encontrar_melhor_microfone():
+    """
+    Verifica todos os microfones e retorna o índice daquele que parece ser o melhor.
+    """
+    print("🎤 Procurando pelo melhor microfone...")
+    nomes_mics = sr.Microphone.list_microphone_names()
+    palavras_chave = ["usb", "headset", "externo"]
+    for i, nome in enumerate(nomes_mics):
+        nome_lower = nome.lower()
+        for palavra in palavras_chave:
+            if palavra in nome_lower:
+                print(f"✅ Microfone preferencial encontrado no índice {i}: '{nome}'")
+                return i
+    print("⚠️ Nenhum microfone preferencial (USB, Headset) encontrado. Usando o padrão do sistema.")
+    return None
+
 
 # --- Configurações Iniciais ---
 pygame.mixer.init()
@@ -15,11 +34,22 @@ recognizer = sr.Recognizer()
 recognizer.pause_threshold = 1.2
 
 try:
-    mic = sr.Microphone()
+    indice_do_microfone = encontrar_melhor_microfone()
+    mic = sr.Microphone(device_index=indice_do_microfone)
+
     with mic as source:
         print("🤫 Calibrando microfone... Por favor, fique em silêncio por 2 segundos.")
         recognizer.adjust_for_ambient_noise(source, duration=2)
-        print(f"🎚️ Limiar de energia ajustado para: {recognizer.energy_threshold:.2f}.")
+        print(f"🎚️  Limiar de energia automático calculado: {recognizer.energy_threshold:.2f}.")
+
+        # --- INÍCIO DA CORREÇÃO DE SEGURANÇA ---
+        # Se a calibração automática resultar em um valor muito baixo, nós forçamos um valor mínimo.
+        VALOR_MINIMO_DE_SENSIBILIDADE = 400
+        if recognizer.energy_threshold < VALOR_MINIMO_DE_SENSIBILIDADE:
+            print(f"⚠️ Limiar automático muito baixo. Forçando para o valor mínimo de {VALOR_MINIMO_DE_SENSIBILIDADE}.")
+            recognizer.energy_threshold = VALOR_MINIMO_DE_SENSIBILIDADE
+        # --- FIM DA CORREÇÃO DE SEGURANÇA ---
+
 except Exception as e:
     print(f"❌ Microfone não encontrado ou não configurado: {e}")
     mic = None
@@ -35,8 +65,6 @@ def _tocar_audio(caminho_arquivo, deletar_depois=False):
         pygame.mixer.music.load(caminho_arquivo)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
-            # A verificação de interrupção agora é controlada pelo estado do mixer
-            # Se parar_fala() for chamado, get_busy() se tornará False e o loop terminará.
             pygame.time.Clock().tick(10)
     except Exception as e:
         print(f"🤯 Erro ao tocar áudio: {e}")
@@ -49,29 +77,21 @@ def _tocar_audio(caminho_arquivo, deletar_depois=False):
                 pass
 
 
-# --- INÍCIO DA CORREÇÃO ---
 def parar_fala():
     """
-    Para a reprodução de áudio imediatamente E limpa o sinalizador de atividade,
-    forçando a interrupção completa da sequência de fala.
+    Para a reprodução de áudio imediatamente E limpa o sinalizador de atividade.
     """
     if pygame.mixer.music.get_busy():
         pygame.mixer.music.stop()
         print("🎤 Interrompendo a fala da LISA.")
-
-    # Esta é a parte crucial: avisa a todos os processos que a fala foi cancelada.
     if tts_is_active.is_set():
         tts_is_active.clear()
-
-
-# --- FIM DA CORREÇÃO ---
 
 
 # --- Funções de Geração de Voz ---
 async def falar(texto):
     """
     Usa um sistema de produtor/consumidor otimizado.
-    Agora respeita a interrupção imediata sinalizada por parar_fala().
     """
     if tts_is_active.is_set(): return
 
@@ -89,7 +109,6 @@ async def falar(texto):
     async def produtor():
         try:
             for frase in frases_validas:
-                # Se a fala foi cancelada no meio do caminho, para de gerar novos áudios.
                 if not tts_is_active.is_set():
                     print("▶️ Produção de áudio interrompida.")
                     break
@@ -105,13 +124,10 @@ async def falar(texto):
             nome_audio = await audio_queue.get()
             if nome_audio is None:
                 break
-
-            # Se a fala foi cancelada, não toca o próximo áudio da fila.
             if not tts_is_active.is_set():
                 print("▶️ Fila de áudio descartada devido à interrupção.")
                 if os.path.exists(nome_audio): os.remove(nome_audio)
-                continue  # Pula para o próximo item da fila (para limpá-la)
-
+                continue
             await loop.run_in_executor(None, _tocar_audio, nome_audio, True)
 
     try:
@@ -119,7 +135,6 @@ async def falar(texto):
     except Exception as e:
         print(f"🤯 Erro durante a fala otimizada: {e}")
     finally:
-        # Garante que o sinalizador seja limpo, caso não tenha sido pela interrupção.
         if tts_is_active.is_set():
             tts_is_active.clear()
 
@@ -137,14 +152,11 @@ def _tocar_audio_rapido_thread(caminho):
 def falar_rapido(nome_arquivo):
     """Toca um arquivo de áudio curto em uma thread separada."""
     if tts_is_active.is_set():
-        # Se estiver falando, interrompe a fala longa para dar prioridade à resposta rápida
         parar_fala()
-        time.sleep(0.1)  # Pequena pausa para garantir que a interrupção seja processada
-
+        time.sleep(0.1)
     nome_seguro = nome_arquivo.replace("!", "").replace("?", "")
     if not nome_seguro.lower().endswith('.mp3'):
         nome_seguro += ".mp3"
-
     caminho_completo = os.path.join("audio_cache", nome_seguro)
     if os.path.exists(caminho_completo):
         print(f"⚡ Usando áudio do cache: '{nome_seguro}'")
