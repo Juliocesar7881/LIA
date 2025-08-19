@@ -9,7 +9,7 @@ from pywinauto import Desktop
 from difflib import SequenceMatcher
 from datetime import datetime
 from utils.tools import listar_todos_apps_acessiveis, encontrar_app_por_nome
-from utils.vision import encontrar_elemento_por_texto
+from utils.vision import encontrar_elementos_por_texto
 import cv2
 import numpy as np
 
@@ -70,6 +70,16 @@ def is_youtube_active():
         return False
     return False
 
+def clicar_em_elemento(elemento):
+    """Clica no centro de um elemento encontrado pela visão computacional."""
+    try:
+        x_centro = elemento['left'] + elemento['width'] // 2
+        y_centro = elemento['top'] + elemento['height'] // 2
+        pyautogui.click(x_centro, y_centro)
+        return True
+    except Exception as e:
+        print(f"🤯 Erro ao clicar no elemento: {e}")
+        return False
 
 # --- FUNÇÕES YOUTUBE (VERSÃO CORRIGIDA E MAIS SIMPLES) ---
 
@@ -143,10 +153,10 @@ def fechar_anuncio_na_tela():
         titulo_original = janela_original.title
         ponto_clique = None
         print("   -> Tentando encontrar o texto 'fechar'...")
-        posicao_texto_fechar = encontrar_elemento_por_texto("fechar")
+        posicao_texto_fechar = encontrar_elementos_por_texto("fechar")
         if posicao_texto_fechar:
-            x = posicao_texto_fechar['left'] + posicao_texto_fechar['width'] // 2
-            y = posicao_texto_fechar['top'] + posicao_texto_fechar['height'] // 2
+            x = posicao_texto_fechar[0]['left'] + posicao_texto_fechar[0]['width'] // 2
+            y = posicao_texto_fechar[0]['top'] + posicao_texto_fechar[0]['height'] // 2
             ponto_clique = (x, y)
             print(f"✅ Texto 'fechar' encontrado. Preparando para clicar em {ponto_clique}...")
         if not ponto_clique:

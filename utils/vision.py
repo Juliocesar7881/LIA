@@ -1,12 +1,15 @@
-# utils/vision.py (Com busca de Tesseract e de elementos)
+# utils/vision.py (Com busca de Tesseract, pré-processamento de imagem e nova lógica de busca)
 
 import pyautogui
 import pytesseract
 from difflib import SequenceMatcher
 import os
+import cv2
+import numpy as np
+from PIL import Image
 
 
-# --- INÍCIO DA LÓGICA DE BUSCA E CACHE OTIMIZADA (SUA VERSÃO) ---
+# --- INÍCIO DA LÓGICA DE BUSCA E CACHE OTIMIZADA ---
 
 def encontrar_e_cachear_tesseract():
     """
@@ -15,7 +18,6 @@ def encontrar_e_cachear_tesseract():
     """
     cache_file = 'tesseract_path.txt'
 
-    # 1. Tenta ler o caminho do cache primeiro
     if os.path.exists(cache_file):
         with open(cache_file, 'r') as f:
             caminho_cache = f.read().strip()
@@ -25,26 +27,19 @@ def encontrar_e_cachear_tesseract():
             else:
                 print("⚠️ Caminho do cache inválido. Realizando nova busca...")
 
-    # 2. Se não houver cache, faz a busca otimizada no Disco C:
     print("🤖 Realizando busca otimizada pelo Tesseract-OCR no Disco C:. Isso deve ser rápido...")
-
     for root, dirs, files in os.walk('C:\\'):
-        # Procura por uma pasta com o nome padrão de instalação
         if 'Tesseract-OCR' in dirs:
             pasta_tesseract = os.path.join(root, 'Tesseract-OCR')
             caminho_executavel = os.path.join(pasta_tesseract, 'tesseract.exe')
-
             if os.path.exists(caminho_executavel):
-                # Salva no cache para a próxima vez
                 with open(cache_file, 'w') as f:
                     f.write(caminho_executavel)
                 print(f"✅ Tesseract-OCR encontrado e salvo no cache: {caminho_executavel}")
                 return caminho_executavel
-
     return None
 
 
-# Configura o pytesseract com o caminho encontrado
 caminho_tesseract = encontrar_e_cachear_tesseract()
 if caminho_tesseract:
     pytesseract.pytesseract.tesseract_cmd = caminho_tesseract
@@ -57,68 +52,83 @@ else:
 # --- FIM DA LÓGICA DE BUSCA ---
 
 
-# --- NOVAS FUNÇÕES ADICIONADAS ---
-
-def encontrar_elemento_por_texto(texto_alvo):
+def _preprocessar_imagem_para_ocr(imagem_pil):
     """
-    Tira um print e retorna a posição e o tamanho do texto mais
-    parecido com o texto_alvo na tela.
-    Retorna um dicionário {'left': x, 'top': y, 'width': w, 'height': h} ou None.
+    Aplica filtros na imagem para melhorar drasticamente a precisão do OCR,
+    especialmente em temas escuros com texto claro.
+    """
+    imagem_cv = cv2.cvtColor(np.array(imagem_pil), cv2.COLOR_RGB2GRAY)
+    # Inverte a imagem (texto branco sobre fundo preto torna-se texto preto sobre fundo branco)
+    # e aplica um threshold binário. Esta é a melhor abordagem para UIs.
+    _, processada = cv2.threshold(imagem_cv, 128, 255, cv2.THRESH_BINARY_INV)
+    return Image.fromarray(processada)
+
+
+def encontrar_elementos_por_texto(texto_alvo):
+    """
+    Tira um print, pré-processa a imagem, encontra todos os textos parecidos
+    e os retorna ordenados, com debug no console.
     """
     try:
-        screenshot = pyautogui.screenshot()
-        dados_ocr = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT, lang='por')
+        screenshot_original = pyautogui.screenshot()
+        screenshot_processada = _preprocessar_imagem_para_ocr(screenshot_original)
 
-        # Agrupa palavras na mesma linha para encontrar frases completas
-        linhas = {}
+        # --- NOVA CONFIGURAÇÃO PARA O TESSERACT ---
+        # --psm 6: Assume um único bloco de texto uniforme. É o melhor para ler UIs.
+        config_tesseract = '--psm 6'
+        dados_ocr = pytesseract.image_to_data(screenshot_processada, lang='por', config=config_tesseract,
+                                              output_type=pytesseract.Output.DICT)
+
+        print(f"\n--- DEBUG DE VISÃO: Procurando por '{texto_alvo}' ---")
+
+        palavras_na_tela = []
         for i in range(len(dados_ocr['text'])):
-            if int(dados_ocr['conf'][i]) > 60:
-                id_linha = (dados_ocr['block_num'][i], dados_ocr['par_num'][i], dados_ocr['line_num'][i])
-                palavra_info = {
-                    'texto': dados_ocr['text'][i], 'left': dados_ocr['left'][i], 'top': dados_ocr['top'][i],
-                    'width': dados_ocr['width'][i], 'height': dados_ocr['height'][i]
-                }
-                if id_linha not in linhas:
-                    linhas[id_linha] = []
-                linhas[id_linha].append(palavra_info)
+            if int(dados_ocr['conf'][i]) > 30 and dados_ocr['text'][i].strip() != '':
+                palavras_na_tela.append({
+                    'text': dados_ocr['text'][i].lower(),
+                    'left': dados_ocr['left'][i],
+                    'top': dados_ocr['top'][i],
+                    'width': dados_ocr['width'][i],
+                    'height': dados_ocr['height'][i]
+                })
 
-        melhor_match = {'elemento': None, 'score': 0.0}
-        for id_linha, palavras in linhas.items():
-            texto_da_linha = ' '.join([p['texto'] for p in palavras]).strip().lower()
-            score = SequenceMatcher(None, texto_alvo.lower(), texto_da_linha).ratio()
+        palavras_alvo = texto_alvo.lower().split()
+        num_palavras_alvo = len(palavras_alvo)
+        resultados_encontrados = []
 
-            if score > melhor_match['score']:
-                elemento = {
-                    'left': min([p['left'] for p in palavras]),
-                    'top': min([p['top'] for p in palavras]),
-                    'width': max([p['left'] + p['width'] for p in palavras]) - min([p['left'] for p in palavras]),
-                    'height': max([p['top'] + p['height'] for p in palavras]) - min([p['top'] for p in palavras])
-                }
-                melhor_match['elemento'] = elemento
-                melhor_match['score'] = score
+        for i in range(len(palavras_na_tela) - num_palavras_alvo + 1):
+            frase_candidata_lista = palavras_na_tela[i: i + num_palavras_alvo]
+            frase_candidata_texto = ' '.join([p['text'] for p in frase_candidata_lista])
 
-        if melhor_match['score'] > 0.7:
-            return melhor_match['elemento']
-        return None
+            score = SequenceMatcher(None, texto_alvo, frase_candidata_texto).ratio()
+
+            # --- ALTERAÇÃO SOLICITADA: Similaridade mínima de 60% ---
+            if score > 0.6:
+                print(f"  - Encontrado: '{frase_candidata_texto}' (Similaridade: {score:.2f})")
+
+                left = min([p['left'] for p in frase_candidata_lista])
+                top = min([p['top'] for p in frase_candidata_lista])
+                right = max([p['left'] + p['width'] for p in frase_candidata_lista])
+                bottom = max([p['top'] + p['height'] for p in frase_candidata_lista])
+
+                resultados_encontrados.append({
+                    'left': left,
+                    'top': top,
+                    'width': right - left,
+                    'height': bottom - top,
+                    'texto': frase_candidata_texto,
+                    'score': score
+                })
+
+        if not resultados_encontrados:
+            print("  - Nenhum texto com similaridade > 60% foi encontrado.")
+
+        print("--- FIM DO DEBUG DE VISÃO ---\n")
+
+        resultados_ordenados = sorted(resultados_encontrados, key=lambda p: (p['top'], p['left']))
+
+        return resultados_ordenados
 
     except Exception as e:
-        print(f"🤯 Erro ao encontrar elemento por texto: {e}")
-        return None
-
-
-def clicar_em_palavra(palavra_alvo):
-    """
-    Função original, agora usando a nova função de busca para encontrar e clicar.
-    """
-    print(f"🔍 Buscando pelo melhor alvo para '{palavra_alvo}'...")
-    elemento = encontrar_elemento_por_texto(palavra_alvo)
-
-    if elemento:
-        x_centro = elemento['left'] + elemento['width'] // 2
-        y_centro = elemento['top'] + elemento['height'] // 2
-        print(f"✅ Alvo encontrado para '{palavra_alvo}'. Clicando em ({x_centro}, {y_centro})...")
-        pyautogui.click(x_centro, y_centro)
-        return True, 1.0, palavra_alvo
-    else:
-        print(f"❌ Nenhum alvo com boa correspondência encontrado para '{palavra_alvo}'.")
-        return False, 0.0, ""
+        print(f"🤯 Erro ao encontrar elementos por texto: {e}")
+        return []

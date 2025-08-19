@@ -25,17 +25,19 @@ from screen_control import (
     fechar_aba_por_nome,
     encontrar_abas_youtube,
     obter_url_da_aba,
-    is_youtube_active
+    is_youtube_active,
+    clicar_em_elemento
 )
 from utils.tools import encontrar_e_abrir_pasta, obter_cotacao_acao, obter_noticias_do_dia
 from transcriber import transcrever_audio_copiado, extrair_caminho_do_clipboard
-from utils.vision import clicar_em_palavra
+from utils.vision import encontrar_elementos_por_texto
 from gpt_bridge import perguntar_ao_gpt, descrever_imagem
 from memory import registrar_evento
 from whatsapp_bot import enviar_mensagem_whatsapp
 from file_converter import converter_video_para_audio
 from youtube_downloader import baixar_media_youtube
 from agenda_control import criar_alarme, listar_alarmes, remover_alarme
+from code_writer import gerar_codigo_e_abrir_no_navegador
 
 # --- Configurações e Funções Auxiliares ---
 ativada = False
@@ -43,7 +45,7 @@ loop_principal = None
 estado_conversa = {}
 CONFIRMACOES_GERAIS = ["Ok.mp3", "Feito.mp3", "Sim.mp3", "Claro.mp3", "Beleza.mp3"]
 CONFIRMACOES_ACAO = ["Ok.mp3", "Fechado.mp3"]
-alarmes_atuais = []  # Armazena a última lista de alarmes para remoção por índice
+alarmes_atuais = []
 
 
 def extrair_valor_numerico(texto):
@@ -119,13 +121,32 @@ async def processar_comando(comando):
         elif any(x in comando for x in ["a segunda", "segunda", "número dois", "opção 2"]):
             if len(estado_conversa['abas']) > 1:
                 aba_selecionada = estado_conversa['abas'][1]
-
         if aba_selecionada:
             url = obter_url_da_aba(aba_selecionada)
             if url:
                 await _iniciar_download(url, estado_conversa['comando_original'])
             else:
                 await falar("Desculpe, não consegui obter o link dessa aba.")
+        else:
+            await falar("Não entendi a sua escolha. Operação cancelada.")
+        estado_conversa = {}
+        return
+
+    if estado_conversa.get('acao') == 'aguardando_selecao_clique':
+        opcao_selecionada = None
+        if any(x in comando for x in ["o primeiro", "primeiro", "a primeira", "primeira", "número um", "opção 1"]):
+            if len(estado_conversa['elementos']) > 0:
+                opcao_selecionada = estado_conversa['elementos'][0]
+        elif any(x in comando for x in ["o segundo", "segundo", "a segunda", "segunda", "número dois", "opção 2"]):
+            if len(estado_conversa['elementos']) > 1:
+                opcao_selecionada = estado_conversa['elementos'][1]
+        elif any(x in comando for x in ["o terceiro", "terceiro", "a terceira", "terceira", "número três", "opção 3"]):
+            if len(estado_conversa['elementos']) > 2:
+                opcao_selecionada = estado_conversa['elementos'][2]
+
+        if opcao_selecionada:
+            clicar_em_elemento(opcao_selecionada)
+            falar_rapido(random.choice(CONFIRMACOES_GERAIS))
         else:
             await falar("Não entendi a sua escolha. Operação cancelada.")
 
@@ -141,6 +162,24 @@ async def processar_comando(comando):
     if any(palavra in comando for palavra in palavras_de_interrupcao):
         registrar_evento("Comando de silêncio.");
         return
+
+    # --- LÓGICA DE PROGRAMAÇÃO ---
+    gatilhos_criar_codigo = ["crie um código", "escreva um código", "faça um código", "crie um script",
+                             "escreva um script", "programe"]
+    for gatilho in gatilhos_criar_codigo:
+        if gatilho in comando:
+            descricao_do_codigo = comando.split(gatilho, 1)[-1].strip()
+            if "para" in descricao_do_codigo.lower().split()[0]:
+                descricao_do_codigo = descricao_do_codigo.split("para", 1)[-1].strip()
+
+            if not descricao_do_codigo:
+                await falar("Claro, o que você quer que eu programe?")
+                return
+
+            await falar(f"Ok, preparando um ambiente de programação para {descricao_do_codigo}. Um momento...")
+            resultado = gerar_codigo_e_abrir_no_navegador(descricao_do_codigo)
+            await falar(resultado)
+            return
 
     # --- LÓGICA DE DESLIGAMENTO (ATUALIZADA) ---
     if comando in ["dormir", "fim", "desativar", "desativa", "desative"]:
@@ -241,7 +280,7 @@ async def processar_comando(comando):
     gatilhos_alarme = ["defina um alarme", "crie um alarme", "me lembre de"]
     for gatilho in gatilhos_alarme:
         if comando.startswith(gatilho):
-            titulo_completo = comando.replace(gatilho, "", 1).strip()
+            titulo_completo = comando.split(gatilho, 1)[-1].strip()
             if not titulo_completo:
                 await falar("Por favor, diga o motivo do alarme.")
                 return
@@ -307,10 +346,11 @@ async def processar_comando(comando):
         os.system("shutdown -r -t 1");
         return
 
-    tempo_especifico = extrair_tempo_especifico_em_segundos(comando)
-    tempo_duracao = extrair_tempo_duracao_em_segundos(comando)
-    if tempo_especifico or tempo_duracao:
-        if 'desligar' in comando or 'reiniciar' in comando:
+    if any(palavra in comando for palavra in ["desligar", "reiniciar", "programar"]) and any(
+            palavra in comando for palavra in ["em", "daqui a", "às", "para as"]):
+        tempo_especifico = extrair_tempo_especifico_em_segundos(comando)
+        tempo_duracao = extrair_tempo_duracao_em_segundos(comando)
+        if tempo_especifico or tempo_duracao:
             tempo_total = tempo_especifico or tempo_duracao
             acao = "r" if "reiniciar" in comando else "s"
             os.system(f"shutdown -{acao} -t {tempo_total}")
@@ -406,19 +446,12 @@ async def processar_comando(comando):
     # --- FIM DA LÓGICA DO WHATSAPP ---
 
     if comando.startswith("transcrever"):
-        falar_rapido(random.choice(CONFIRMACOES_GERAIS));
         texto_transcrito = None
         if "copiado" in comando:
             texto_transcrito = transcrever_audio_copiado()
-        elif "selecionado" in comando:
-            if copiar_caminho_selecionado(): texto_transcrito = transcrever_audio_copiado()
-        else:
-            nome_arquivo = comando.replace("transcrever áudio", "").replace("transcrever", "").strip()
-            if not nome_arquivo: await falar("Especifique o arquivo."); return
-            if clicar_em_palavra(nome_arquivo)[0]:
-                if copiar_caminho_selecionado(): texto_transcrito = transcrever_audio_copiado()
-        if texto_transcrito and "Não encontrei" not in texto_transcrito and "erro" not in texto_transcrito and "não parece" not in texto_transcrito:
-            pyperclip.copy(texto_transcrito);
+
+        if texto_transcrito and not any(err in texto_transcrito for err in ["Não encontrei", "erro", "não parece"]):
+            pyperclip.copy(texto_transcrito)
             falar_rapido("OkTransscrito.mp3")
         else:
             await falar(texto_transcrito or "Falha na transcrição.")
@@ -517,6 +550,11 @@ async def processar_comando(comando):
         falar_rapido(random.choice(CONFIRMACOES_GERAIS))
         return
 
+    gatilhos_apagar = ["apagar", "backspace", "excluir"]
+    if comando in gatilhos_apagar:
+        apertar_tecla('backspace')
+        return
+
     gatilhos_selecionar_tudo = ["selecionar tudo", "seleciona tudo", "selecione tudo", "selecionar todos",
                                 "seleciona todos", "ctrl a"]
     if any(gatilho in comando for gatilho in gatilhos_selecionar_tudo):
@@ -536,8 +574,10 @@ async def processar_comando(comando):
             nome_arquivo = comando.replace(gatilho, "", 1).strip()
             if nome_arquivo:
                 await falar(f"Ok, tentando selecionar e copiar {nome_arquivo}...")
-                sucesso_clique, _, _ = clicar_em_palavra(nome_arquivo)
-                if not sucesso_clique:
+                elementos = encontrar_elementos_por_texto(nome_arquivo)
+                if elementos:
+                    clicar_em_elemento(elementos[0])
+                else:
                     await falar("Não consegui encontrar esse arquivo na tela.")
                     return
             if copiar_arquivo_selecionado():
@@ -562,12 +602,26 @@ async def processar_comando(comando):
                        "clica", "clique"]
     for gatilho in gatilhos_clique:
         if comando.startswith(gatilho):
-            palavra_alvo = comando[len(gatilho):].strip();
-            if palavra_alvo and clicar_em_palavra(palavra_alvo)[0]:
-                pass
-            else:
-                await falar("Não vi.");
+            palavra_alvo = comando.split(gatilho, 1)[-1].strip()
+            if not palavra_alvo:
+                await falar("O que devo clicar?")
                 return
+
+            elementos = encontrar_elementos_por_texto(palavra_alvo)
+
+            if not elementos:
+                await falar("Não vi.")
+                return
+
+            if len(elementos) == 1:
+                clicar_em_elemento(elementos[0])
+                falar_rapido(random.choice(CONFIRMACOES_GERAIS))
+            else:
+                await falar(
+                    f"Encontrei {len(elementos)} opções para '{palavra_alvo}'. Qual devo clicar sendo na ordem de cima para baixo?")
+                estado_conversa['acao'] = 'aguardando_selecao_clique'
+                estado_conversa['elementos'] = elementos
+            return
 
     gatilhos_abrir = ["abrir", "abra", "abre", "executar", "executa", "execute", "iniciar", "inicia", "rodar", "rode",
                       "roda"]

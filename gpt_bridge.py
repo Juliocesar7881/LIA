@@ -4,6 +4,7 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 import PIL.Image
+import re
 
 # Carrega as variáveis de ambiente
 load_dotenv()
@@ -31,12 +32,9 @@ def perguntar_ao_gpt(mensagem_usuario):
         )
         response = model.generate_content(mensagem_usuario)
 
-        # --- INÍCIO DA CORREÇÃO ---
-        # Verifica se a resposta foi bloqueada ou retornou vazia
         if not response.parts:
             print("⚠️ Resposta do Gemini foi bloqueada ou retornou vazia (provavelmente filtro de segurança).")
             return "Não posso responder a isso."
-        # --- FIM DA CORREÇÃO ---
 
         print("✅ Resposta de texto recebida do Gemini.")
         return response.text.strip()
@@ -55,12 +53,9 @@ def descrever_imagem(caminho_imagem, prompt_texto):
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content([prompt_texto, img])
 
-        # --- INÍCIO DA CORREÇÃO ---
-        # Verifica também na função de imagem
         if not response.parts:
             print("⚠️ Análise de imagem do Gemini foi bloqueada ou retornou vazia.")
             return "Não consegui processar o conteúdo desta imagem."
-        # --- FIM DA CORREÇÃO ---
 
         print("✅ Análise de imagem recebida do Gemini.")
         return response.text.strip()
@@ -70,3 +65,34 @@ def descrever_imagem(caminho_imagem, prompt_texto):
     except Exception as e:
         print(f"🤯 Erro ao chamar a API do Gemini (imagem): {e}")
         return "Desculpe, não consegui analisar a imagem."
+
+
+def gerar_codigo_com_gpt(prompt_usuario: str) -> str:
+    """
+    Envia um prompt para o Gemini com foco em gerar apenas código Python.
+    """
+    print("🤖 Enviando prompt de geração de código para o Google Gemini...")
+    try:
+        model = genai.GenerativeModel(
+            'gemini-1.5-flash-latest',
+            system_instruction=(
+                "Você é um assistente de programação especialista em Python. "
+                "Sua tarefa é gerar APENAS o código Python funcional que resolve o pedido do usuário. "
+                "Não inclua explicações, comentários desnecessários, ou a palavra 'python' no início do código. "
+                "O código deve ser completo e pronto para ser executado."
+            )
+        )
+        response = model.generate_content(f"Crie um script Python que faça o seguinte: {prompt_usuario}")
+
+        if not response.parts:
+            print("⚠️ Geração de código bloqueada ou retornou vazia.")
+            return None
+
+        # Limpa a resposta para remover ```python e ``` do início e fim
+        codigo_limpo = re.sub(r'^```python\s*|\s*```$', '', response.text.strip(), flags=re.MULTILINE)
+
+        print("✅ Código recebido do Gemini.")
+        return codigo_limpo
+    except Exception as e:
+        print(f"🤯 Erro ao chamar a API do Gemini (código): {e}")
+        return None

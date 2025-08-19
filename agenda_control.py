@@ -1,4 +1,4 @@
-# agenda_control.py (Versão Final com Agendador de Tarefas do Windows)
+# agenda_control.py (Versão com Agendador de Tarefas do Windows)
 
 import os
 import re
@@ -69,6 +69,8 @@ def listar_alarmes() -> list:
         for linha in resultado.strip().split('\n'):
             try:
                 partes = linha.split('","')
+                # Colunas corretas no output de schtasks:
+                # 0: HostName, 1: TaskName, 2: Next Run Time
                 nome_tarefa_completo = partes[1].strip('"').lstrip('\\')
                 proxima_execucao_str = partes[2].strip('"')
 
