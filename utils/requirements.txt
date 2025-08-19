@@ -23,3 +23,9 @@ openai
 pytesseract
 Pillow
 google-generativeai
+
+# Para conversão de arquivos
+moviepy==1.0.3
+
+# Para baixar do YouTube
+yt-dlp

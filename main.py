@@ -22,26 +22,42 @@ from screen_control import (
     tirar_print,
     abrir_nova_aba,
     fechar_anuncio_na_tela,
-    fechar_aba_por_nome
+    fechar_aba_por_nome,
+    encontrar_abas_youtube,
+    obter_url_da_aba,
+    is_youtube_active
 )
 from utils.tools import encontrar_e_abrir_pasta, obter_cotacao_acao, obter_noticias_do_dia
 from transcriber import transcrever_audio_copiado, extrair_caminho_do_clipboard
 from utils.vision import clicar_em_palavra
 from gpt_bridge import perguntar_ao_gpt, descrever_imagem
 from memory import registrar_evento
-from whatsapp_bot import enviar_mensagem_por_voz
+from whatsapp_bot import enviar_mensagem_whatsapp
+from file_converter import converter_video_para_audio
+from youtube_downloader import baixar_media_youtube
+from agenda_control import criar_alarme, listar_alarmes, remover_alarme
 
 # --- Configurações e Funções Auxiliares ---
 ativada = False
 loop_principal = None
-estado_conversa = {}  # <-- "Memória" de curto prazo da LISA
+estado_conversa = {}
 CONFIRMACOES_GERAIS = ["Ok.mp3", "Feito.mp3", "Sim.mp3", "Claro.mp3", "Beleza.mp3"]
 CONFIRMACOES_ACAO = ["Ok.mp3", "Fechado.mp3"]
+alarmes_atuais = []  # Armazena a última lista de alarmes para remoção por índice
+
+
+def extrair_valor_numerico(texto):
+    match = re.search(r'\d+', texto)
+    if match:
+        return int(match.group(0))
+    return None
 
 
 def extrair_tempo_duracao_em_segundos(comando):
+    comando_normalizado = comando.replace(" uma ", " 1 ").replace(" um ", " 1 ")
     unidades = {'segundo': 1, 'minuto': 60, 'hora': 3600, 'dia': 86400}
-    match = re.search(r'(\d+)\s+(segundo|segundos|minuto|minutos|hora|horas|dia|dias)', comando, re.IGNORECASE)
+    match = re.search(r'(\d+)\s+(segundo|segundos|minuto|minutos|hora|horas|dia|dias)', comando_normalizado,
+                      re.IGNORECASE)
     if match:
         valor = int(match.group(1));
         unidade_encontrada = match.group(2).lower()
@@ -68,9 +84,19 @@ async def cancelar_desligamento():
     await falar("Cancelado.")
 
 
+async def _iniciar_download(url, comando):
+    baixar_so_audio = "música" in comando or "áudio" in comando
+    if baixar_so_audio:
+        await falar(f"Ok, a baixar a música, por favor aguarde.")
+    else:
+        await falar(f"Ok, a baixar o vídeo, por favor aguarde.")
+    resultado = baixar_media_youtube(url, baixar_audio=baixar_so_audio)
+    await falar(resultado)
+
+
 # --- Processador de Comandos ---
 async def processar_comando(comando):
-    global ativada, estado_conversa
+    global ativada, estado_conversa, alarmes_atuais
     comando = comando.strip().lower()
 
     # --- LÓGICA DE CONVERSA ---
@@ -83,8 +109,27 @@ async def processar_comando(comando):
             await falar("Até mais.")
         else:
             await falar("Não entendi sua escolha. Operação cancelada.")
+        estado_conversa = {}
+        return
 
-        estado_conversa = {}  # Limpa o estado da conversa
+    if estado_conversa.get('acao') == 'aguardando_selecao_youtube':
+        aba_selecionada = None
+        if any(x in comando for x in ["a primeira", "primeira", "número um", "opção 1"]):
+            aba_selecionada = estado_conversa['abas'][0]
+        elif any(x in comando for x in ["a segunda", "segunda", "número dois", "opção 2"]):
+            if len(estado_conversa['abas']) > 1:
+                aba_selecionada = estado_conversa['abas'][1]
+
+        if aba_selecionada:
+            url = obter_url_da_aba(aba_selecionada)
+            if url:
+                await _iniciar_download(url, estado_conversa['comando_original'])
+            else:
+                await falar("Desculpe, não consegui obter o link dessa aba.")
+        else:
+            await falar("Não entendi a sua escolha. Operação cancelada.")
+
+        estado_conversa = {}
         return
     # --- FIM DA LÓGICA DE CONVERSA ---
 
@@ -98,20 +143,17 @@ async def processar_comando(comando):
         return
 
     # --- LÓGICA DE DESLIGAMENTO (ATUALIZADA) ---
-    # Comandos diretos para desativar a assistente
     if comando in ["dormir", "fim", "desativar", "desativa", "desative"]:
         ativada = False;
         await falar("Até mais.");
         registrar_evento("Assistente desativada.");
         return
 
-    # Comando ambíguo que inicia a conversa
     if comando in ["desligar", "desliga"]:
         estado_conversa = {'acao': 'aguardando_confirmacao_desligar'}
         await falar("Você quer desligar a assistente ou o computador?")
         return
 
-    # Comandos diretos para desligar o PC
     gatilhos_desligar_pc = ["desligar pc", "desligar o computador", "desligar máquina", "desligue o pc",
                             "desligue o computador", "encerrar o sistema", "encerrar", "shutdown"]
     if any(gatilho in comando for gatilho in gatilhos_desligar_pc) and "programar" not in comando:
@@ -119,6 +161,109 @@ async def processar_comando(comando):
         os.system("shutdown -s -t 1");
         return
     # --- FIM DA LÓGICA DE DESLIGAMENTO ---
+
+    # --- COMANDOS DE CONTROLE DE MÍDIA (LÓGICA REFINADA) ---
+    if any(palavra in comando for palavra in ["play", "pausar", "tocar", "continuar", "pausa"]):
+        apertar_tecla('play/pause')
+        return
+
+    if any(palavra in comando for palavra in ["próxima música", "próxima faixa", "próximo"]):
+        if is_youtube_active():
+            apertar_tecla('shift+n')
+        else:
+            apertar_tecla('próxima')
+        return
+
+    if any(palavra in comando for palavra in ["música anterior", "faixa anterior", "anterior"]):
+        apertar_tecla('anterior')
+        return
+
+    if any(palavra in comando for palavra in ["aumentar o volume", "aumenta o som"]):
+        valor = extrair_valor_numerico(comando)
+        repeticoes = 3
+        if valor:
+            repeticoes = valor // 2
+
+        for _ in range(repeticoes):
+            apertar_tecla('aumentar volume')
+            time.sleep(0.05)
+        return
+
+    if any(palavra in comando for palavra in ["diminuir o volume", "abaixar o som", "abaixa o som"]):
+        valor = extrair_valor_numerico(comando)
+        repeticoes = 3
+        if valor:
+            repeticoes = valor // 2
+
+        for _ in range(repeticoes):
+            apertar_tecla('diminuir volume')
+            time.sleep(0.05)
+        return
+
+    if comando in ["mudo", "silenciar"]:
+        apertar_tecla('mudo')
+        return
+    # --- FIM DO BLOCO DE MÍDIA ---
+
+    # --- BLOCO DE DESPERTADOR (LÓGICA FINAL) ---
+    gatilhos_listar = ["quais são meus alarmes", "meus lembretes", "o que tenho agendado"]
+    if any(gatilho in comando for gatilho in gatilhos_listar):
+        alarmes_atuais = listar_alarmes()
+        if not alarmes_atuais:
+            await falar("Você não tem nenhum alarme definido.")
+        else:
+            resposta_falada = "Aqui estão os seus alarmes em ordem: "
+            partes_resposta = []
+            for i, alarme in enumerate(alarmes_atuais):
+                partes_resposta.append(f"{i + 1}. {alarme['titulo']}.")
+            resposta_falada += " ".join(partes_resposta)
+            await falar(resposta_falada)
+        return
+
+    gatilhos_remover = ["remova o alarme", "remover alarme", "apagar alarme", "remova o lembrete"]
+    for gatilho in gatilhos_remover:
+        if gatilho in comando:
+            termo_para_remover = comando.split(gatilho, 1)[-1].strip()
+
+            # Tenta remover por índice primeiro
+            indice = extrair_valor_numerico(termo_para_remover)
+            if indice and 0 < indice <= len(alarmes_atuais):
+                alarme_a_remover = alarmes_atuais.pop(indice - 1)
+                if remover_alarme(alarme_a_remover['nome_completo']):
+                    await falar(f"Ok, removi o alarme {indice}.")
+                else:
+                    await falar("Ocorreu um erro ao tentar remover esse alarme.")
+                return
+
+            await falar(f"Não encontrei o alarme número {indice}. Tente listar os alarmes primeiro.")
+            return
+
+    gatilhos_alarme = ["defina um alarme", "crie um alarme", "me lembre de"]
+    for gatilho in gatilhos_alarme:
+        if comando.startswith(gatilho):
+            titulo_completo = comando.replace(gatilho, "", 1).strip()
+            if not titulo_completo:
+                await falar("Por favor, diga o motivo do alarme.")
+                return
+
+            segundos = extrair_tempo_duracao_em_segundos(comando)
+            if not segundos:
+                await falar(
+                    "Não consegui entender para quando devo definir. Por favor, inclua um tempo como 'em 5 minutos'.")
+                return
+
+            data_hora = datetime.now() + timedelta(seconds=segundos)
+
+            padrao_limpeza = r'\s+(em|daqui a)\s+.*'
+            titulo_final = re.sub(padrao_limpeza, '', titulo_completo, flags=re.IGNORECASE)
+
+            if titulo_final.startswith("para "):
+                titulo_final = titulo_final[5:]
+
+            resultado = criar_alarme(titulo_final.strip(), data_hora)
+            await falar(resultado)
+            return
+    # --- FIM DO BLOCO DE DESPERTADOR ---
 
     # Comandos de Navegação
     gatilhos_nova_aba = ["abrir nova aba", "abre uma nova aba", "nova aba", "nova guia", "abre nova guia"]
@@ -165,14 +310,11 @@ async def processar_comando(comando):
     tempo_especifico = extrair_tempo_especifico_em_segundos(comando)
     tempo_duracao = extrair_tempo_duracao_em_segundos(comando)
     if tempo_especifico or tempo_duracao:
-        tempo_total = tempo_especifico or tempo_duracao
-        if "reiniciar" in comando:
-            os.system(f"shutdown -r -t {tempo_total}");
-            await falar("Ok, reinicialização agendada.");
-            return
-        elif "desligar" in comando:
-            os.system(f"shutdown -s -t {tempo_total}");
-            await falar("Ok, desligamento agendado.");
+        if 'desligar' in comando or 'reiniciar' in comando:
+            tempo_total = tempo_especifico or tempo_duracao
+            acao = "r" if "reiniciar" in comando else "s"
+            os.system(f"shutdown -{acao} -t {tempo_total}")
+            await falar(f"Ok, agendamento de {'reinicialização' if acao == 'r' else 'desligamento'} concluído.")
             return
 
     gatilhos_cancelar = ["cancelar desligamento", "cancelar o desligamento", "cancelar reinicialização",
@@ -241,14 +383,27 @@ async def processar_comando(comando):
                 await falar("Por favor, diga o nome da aba que devo fechar.")
             return
 
+    # --- LÓGICA DO WHATSAPP (CORRIGIDA) ---
     gatilhos_whatsapp = [
         "mande um zap para", "manda um zap para", "enviar um zap para",
         "mande uma mensagem para", "manda uma mensagem para", "enviar uma mensagem para"
     ]
-    if any(comando.startswith(gatilho) for gatilho in gatilhos_whatsapp):
-        resposta = await enviar_mensagem_por_voz(comando)
-        await falar(resposta)
-        return
+    for gatilho in gatilhos_whatsapp:
+        if comando.startswith(gatilho):
+            resto_comando = comando.replace(gatilho, "", 1).strip()
+            partes = resto_comando.split(" ", 1)
+
+            if len(partes) < 2:
+                await falar("Por favor, diga o nome do contato e a mensagem que quer enviar.")
+                return
+
+            nome_contato, mensagem = partes[0], partes[1]
+
+            await falar(f"Ok, a enviar a seguinte mensagem para {nome_contato}: {mensagem}")
+            resultado = await enviar_mensagem_whatsapp(nome_contato, mensagem)
+            await falar(resultado)
+            return
+    # --- FIM DA LÓGICA DO WHATSAPP ---
 
     if comando.startswith("transcrever"):
         falar_rapido(random.choice(CONFIRMACOES_GERAIS));
@@ -267,6 +422,70 @@ async def processar_comando(comando):
             falar_rapido("OkTransscrito.mp3")
         else:
             await falar(texto_transcrito or "Falha na transcrição.")
+        return
+
+    gatilhos_converter = ["converta o arquivo", "converter arquivo", "mudar o formato"]
+    if any(gatilho in comando for gatilho in gatilhos_converter):
+        partes_comando = comando.split(" para ")
+        if len(partes_comando) < 2:
+            await falar("Por favor, especifique o formato de destino. Por exemplo: 'converta para mp3'.")
+            return
+
+        formato_saida = partes_comando[-1].strip().lower()
+        caminho_arquivo_copiado = extrair_caminho_do_clipboard()
+
+        if not caminho_arquivo_copiado:
+            await falar(
+                f"Certo. Para converter para {formato_saida}, por favor, copie o arquivo. Você tem 10 segundos.")
+            await asyncio.sleep(10)
+            caminho_arquivo_copiado = extrair_caminho_do_clipboard()
+
+            if not caminho_arquivo_copiado:
+                await falar(
+                    "Ainda não encontrei um arquivo válido na sua área de transferência. Tente o comando novamente.")
+                return
+
+        await falar("Ok, encontrei o arquivo. Iniciando a conversão, isso pode demorar um pouco.")
+
+        if formato_saida in ["mp3", "wav", "m4a"]:
+            resultado = converter_video_para_audio(caminho_arquivo_copiado, formato_saida)
+        else:
+            resultado = f"Desculpe, a conversão para o formato {formato_saida} ainda não foi implementada."
+
+        await falar(resultado)
+        return
+
+    gatilhos_youtube = ["baixar do youtube", "baixar vídeo", "baixar música"]
+    if any(gatilho in comando for gatilho in gatilhos_youtube):
+        abas_yt = encontrar_abas_youtube()
+
+        if len(abas_yt) == 1:
+            await falar("Encontrei uma aba do YouTube aberta. Iniciando o download.")
+            url = obter_url_da_aba(abas_yt[0])
+            if url:
+                await _iniciar_download(url, comando)
+            else:
+                await falar("Desculpe, não consegui obter o link da aba.")
+
+        elif len(abas_yt) > 1:
+            await falar(f"Encontrei {len(abas_yt)} abas do YouTube. Qual delas você quer baixar?")
+            for i, aba in enumerate(abas_yt[:3]):
+                titulo_limpo = aba['titulo'].replace("- YouTube", "").strip()
+                await falar(f"A {'primeira' if i == 0 else 'segunda' if i == 1 else 'terceira'} é: {titulo_limpo}")
+
+            estado_conversa['acao'] = 'aguardando_selecao_youtube'
+            estado_conversa['abas'] = abas_yt
+            estado_conversa['comando_original'] = comando
+
+        else:
+            await falar(
+                "Não encontrei nenhuma aba do YouTube aberta. Por favor, copie o link. Você tem 10 segundos.")
+            await asyncio.sleep(10)
+            url = pyperclip.paste()
+            if "youtube.com" in url or "youtu.be" in url:
+                await _iniciar_download(url, comando)
+            else:
+                await falar("Não encontrei um link válido. Tente o comando novamente.")
         return
 
     gatilhos_fechar = ["fechar", "fecha", "feche", "mate", "mata"]
@@ -422,7 +641,7 @@ async def main():
         await asyncio.sleep(1)
 
 
-if __name__ == "_main_":
+if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

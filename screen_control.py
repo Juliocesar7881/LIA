@@ -1,4 +1,4 @@
-# screen_control.py (Com a nova função para abrir abas)
+# screen_control.py (Com a nova função para abrir abas e encontrar o YouTube)
 
 import pyautogui
 import time
@@ -13,7 +13,7 @@ from utils.vision import encontrar_elemento_por_texto
 import cv2
 import numpy as np
 
-# --- DICIONÁRIO DE TECLAS (sem alterações) ---
+# --- DICIONÁRIO DE TECLAS (COM TECLAS DE MÍDIA) ---
 KEY_MAP = {
     'enter': 'enter', 'enviar': 'enter', 'confirma': 'enter', 'confirmar': 'enter',
     'espaço': 'space', 'space': 'space',
@@ -44,14 +44,88 @@ KEY_MAP = {
     'menos': '-', 'subtrair': '-',
     'barra': '/', 'dividir': '/',
     'ponto': '.', 'vírgula': ',',
+    # --- TECLAS DE MÍDIA ADICIONADAS ---
+    'play/pause': 'playpause', 'playpause': 'playpause',
+    'próxima': 'nexttrack', 'nexttrack': 'nexttrack',
+    'anterior': 'prevtrack', 'prevtrack': 'prevtrack',
+    'aumentar volume': 'volumeup', 'volumeup': 'volumeup',
+    'diminuir volume': 'volumedown', 'volumedown': 'volumedown',
+    'mudo': 'volumemute', 'volumemute': 'volumemute',
+    # --- FIM DAS TECLAS ADICIONADAS ---
     **{chr(i): chr(i) for i in range(97, 123)},
     **{str(i): str(i) for i in range(10)},
 }
 
 
 # --- NOVA FUNÇÃO ADICIONADA ---
+def is_youtube_active():
+    """Verifica se a janela atualmente em foco é uma aba do YouTube."""
+    try:
+        active_window = pyautogui.getActiveWindow()
+        if active_window and active_window.title and "youtube" in active_window.title.lower():
+            print("✅ Janela ativa é do YouTube.")
+            return True
+    except Exception as e:
+        print(f"⚠️ Erro ao verificar janela ativa: {e}")
+        return False
+    return False
+
+
+# --- FUNÇÕES YOUTUBE (VERSÃO CORRIGIDA E MAIS SIMPLES) ---
+
+def encontrar_abas_youtube():
+    """
+    Encontra todas as janelas visíveis que contenham "YouTube" no título.
+    Esta versão é mais simples e robusta, pois não depende de permissões para ler o nome do processo.
+    """
+    print("🔎 Procurando por abas do YouTube (método simplificado)...")
+    abas_encontradas = []
+    try:
+        desktop = Desktop(backend="uia")
+        for janela in desktop.windows(visible_only=True):
+            titulo = janela.window_text()
+            if titulo and "youtube" in titulo.lower():
+                abas_encontradas.append({
+                    "janela": janela,
+                    "titulo": titulo
+                })
+        print(f"✅ Encontradas {len(abas_encontradas)} abas do YouTube.")
+        return abas_encontradas
+    except Exception as e:
+        print(f"🤯 Erro ao procurar abas do YouTube: {e}")
+        return []
+
+
+def obter_url_da_aba(aba_info):
+    """
+    Foca na janela do navegador, copia o URL da barra de endereço e o retorna.
+    """
+    try:
+        janela = aba_info["janela"]
+        print(f"🔗 Obtendo URL da aba: '{aba_info['titulo']}'")
+
+        # Traz a janela para frente
+        if janela.is_minimized():
+            janela.restore()
+        janela.set_focus()
+        time.sleep(0.5)
+
+        # Atalho para focar a barra de endereço e copiar
+        pyautogui.hotkey('ctrl', 'l')
+        time.sleep(0.2)
+        pyautogui.hotkey('ctrl', 'c')
+        time.sleep(0.2)
+
+        url = pyperclip.paste()
+        return url
+    except Exception as e:
+        print(f"🤯 Erro ao obter URL da aba: {e}")
+        return None
+
+
+# --- FUNÇÕES EXISTENTES ---
+
 def abrir_nova_aba():
-    """Abre uma nova aba no navegador usando o atalho universal Ctrl+T."""
     try:
         print("📑 Abrindo nova aba (Ctrl+T)...")
         pyautogui.hotkey('ctrl', 't')
@@ -60,21 +134,14 @@ def abrir_nova_aba():
         print(f"🤯 Erro ao tentar abrir nova aba: {e}")
         return False
 
-# --- FUNÇÕES DE NAVEGAÇÃO (ATUALIZADAS) ---
 
 def fechar_anuncio_na_tela():
-    """
-    Procura por um 'X' ou o texto "fechar" para fechar anúncios.
-    Se uma nova aba for aberta, ela a fecha automaticamente.
-    """
     print("🔎 Procurando por anúncio para fechar...")
     try:
         janela_original = pyautogui.getActiveWindow()
         if not janela_original: return False
         titulo_original = janela_original.title
-
         ponto_clique = None
-
         print("   -> Tentando encontrar o texto 'fechar'...")
         posicao_texto_fechar = encontrar_elemento_por_texto("fechar")
         if posicao_texto_fechar:
@@ -82,7 +149,6 @@ def fechar_anuncio_na_tela():
             y = posicao_texto_fechar['top'] + posicao_texto_fechar['height'] // 2
             ponto_clique = (x, y)
             print(f"✅ Texto 'fechar' encontrado. Preparando para clicar em {ponto_clique}...")
-
         if not ponto_clique:
             print("   -> Texto não encontrado. Tentando encontrar ícone 'X'...")
             screenshot_pil = pyautogui.screenshot()
@@ -94,31 +160,24 @@ def fechar_anuncio_na_tela():
             res = cv2.matchTemplate(gray_screenshot, template, cv2.TM_CCOEFF_NORMED)
             threshold = 0.7
             loc = np.where(res >= threshold)
-
             largura_tela, altura_tela = pyautogui.size()
             y_limite_superior = altura_tela * 0.08
-
             pontos_validos = [pt for pt in zip(*loc[::-1]) if pt[1] > y_limite_superior]
-
             if pontos_validos:
                 ponto_final = max(pontos_validos, key=lambda p: (-p[1], p[0]))
                 ponto_clique = (ponto_final[0] + 10, ponto_final[1] + 10)
                 print(f"✅ Ícone 'X' de anúncio encontrado. Preparando para clicar em {ponto_clique}...")
-
         if not ponto_clique:
             print("❌ Nenhum método para fechar anúncio funcionou.")
             return False
-
         pyautogui.click(ponto_clique)
         time.sleep(1.5)
-
         janela_depois_clique = pyautogui.getActiveWindow()
         if janela_depois_clique and janela_depois_clique.title != titulo_original:
             print("   -> Nova aba/janela detectada. Fechando-a...")
             pyautogui.hotkey('ctrl', 'w')
             time.sleep(0.5)
             print("   -> Retornando à aba original.")
-
         return True
     except Exception as e:
         print(f"🤯 Erro ao tentar fechar anúncio: {e}")
@@ -126,50 +185,39 @@ def fechar_anuncio_na_tela():
 
 
 def fechar_aba_por_nome(nome_aba):
-    """
-    CORRIGIDO: Encontra uma janela que contenha o nome da aba e a fecha com Ctrl+W.
-    """
     print(f"🔎 Procurando pela janela/aba '{nome_aba}' para fechar...")
     try:
         desktop = Desktop(backend="win32")
         janelas = desktop.windows(visible_only=True, enabled_only=True)
-
         melhor_match = None
         maior_score = 0.0
-
         for janela in janelas:
             titulo = janela.window_text()
             if titulo and nome_aba.lower() in titulo.lower():
-                # Encontrou uma janela que contém o nome da aba
                 score = SequenceMatcher(None, nome_aba.lower(), titulo.lower()).ratio()
                 if score > maior_score:
                     maior_score = score
                     melhor_match = janela
-
         if melhor_match:
             print(f"✅ Janela '{melhor_match.window_text()}' encontrada. Trazendo para frente e fechando a aba...")
             if melhor_match.is_minimized():
                 melhor_match.restore()
             melhor_match.set_focus()
-            time.sleep(0.2)  # Pausa para garantir o foco
+            time.sleep(0.2)
             pyautogui.hotkey('ctrl', 'w')
             return True
         else:
             print(f"❌ Nenhuma janela correspondente à aba '{nome_aba}' foi encontrada.")
             return False
-
     except Exception as e:
         print(f"🤯 Erro ao tentar fechar aba por nome: {e}")
         return False
 
 
-# --- SUAS FUNÇÕES ORIGINAIS (MANTIDAS) ---
-
 def executar_acao_na_tela(app_falado):
     if not app_falado:
         print("⚠️ Alvo para abrir não especificado.")
         return False
-
     print(f"🔎 Procurando por janelas abertas de '{app_falado}'...")
     try:
         desktop = Desktop(backend="win32")
@@ -188,7 +236,6 @@ def executar_acao_na_tela(app_falado):
             return True
     except Exception as e:
         print(f"🤯 Erro ao verificar janelas abertas: {e}")
-
     print(f"ℹ️ Nenhuma janela encontrada. Tentando abrir o aplicativo '{app_falado}'...")
     if "explorer" in app_falado or "arquivos" in app_falado:
         os.system("start explorer")
@@ -196,7 +243,6 @@ def executar_acao_na_tela(app_falado):
     elif app_falado == "configurações":
         os.system("start ms-settings:")
         return True
-
     apps = listar_todos_apps_acessiveis()
     caminho_encontrado = encontrar_app_por_nome(app_falado, apps)
     if caminho_encontrado:

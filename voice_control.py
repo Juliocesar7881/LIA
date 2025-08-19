@@ -44,7 +44,7 @@ try:
 
         # --- INÍCIO DA CORREÇÃO DE SEGURANÇA ---
         # Se a calibração automática resultar em um valor muito baixo, nós forçamos um valor mínimo.
-        VALOR_MINIMO_DE_SENSIBILIDADE = 400
+        VALOR_MINIMO_DE_SENSIBILIDADE = 350
         if recognizer.energy_threshold < VALOR_MINIMO_DE_SENSIBILIDADE:
             print(f"⚠️ Limiar automático muito baixo. Forçando para o valor mínimo de {VALOR_MINIMO_DE_SENSIBILIDADE}.")
             recognizer.energy_threshold = VALOR_MINIMO_DE_SENSIBILIDADE
@@ -103,7 +103,7 @@ async def falar(texto):
     if not frases_validas: return
 
     tts_is_active.set()
-    loop = asyncio.get_running_loop()
+    loop = asyncio.get_event_loop()
     audio_queue = asyncio.Queue()
 
     async def produtor():
