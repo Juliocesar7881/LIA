@@ -20,7 +20,7 @@ except Exception as e:
     print(f"🤯 Erro ao configurar a API do Gemini: {e}")
 
 
-def perguntar_ao_gpt(mensagem_usuario):
+async def perguntar_ao_gpt(mensagem_usuario):
     """
     Envia um prompt de TEXTO para o modelo Gemini e trata respostas vazias.
     """
@@ -30,7 +30,7 @@ def perguntar_ao_gpt(mensagem_usuario):
             'gemini-1.5-flash-latest',
             system_instruction="Você é a assistente LISA. Responda perguntas de forma direta e clara."
         )
-        response = model.generate_content(mensagem_usuario)
+        response = await model.generate_content_async(mensagem_usuario)
 
         if not response.parts:
             print("⚠️ Resposta do Gemini foi bloqueada ou retornou vazia (provavelmente filtro de segurança).")
@@ -43,7 +43,7 @@ def perguntar_ao_gpt(mensagem_usuario):
         return "Desculpe, estou com problemas de conexão com minha IA."
 
 
-def descrever_imagem(caminho_imagem, prompt_texto):
+async def descrever_imagem(caminho_imagem, prompt_texto):
     """
     Envia uma IMAGEM e um prompt de texto para o Gemini e trata respostas vazias.
     """
@@ -51,7 +51,7 @@ def descrever_imagem(caminho_imagem, prompt_texto):
     try:
         img = PIL.Image.open(caminho_imagem)
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        response = model.generate_content([prompt_texto, img])
+        response = await model.generate_content_async([prompt_texto, img])
 
         if not response.parts:
             print("⚠️ Análise de imagem do Gemini foi bloqueada ou retornou vazia.")
@@ -67,7 +67,7 @@ def descrever_imagem(caminho_imagem, prompt_texto):
         return "Desculpe, não consegui analisar a imagem."
 
 
-def gerar_codigo_com_gpt(prompt_usuario: str) -> str:
+async def gerar_codigo_com_gpt(prompt_usuario: str) -> str:
     """
     Envia um prompt para o Gemini com foco em gerar apenas código Python.
     """
@@ -82,17 +82,50 @@ def gerar_codigo_com_gpt(prompt_usuario: str) -> str:
                 "O código deve ser completo e pronto para ser executado."
             )
         )
-        response = model.generate_content(f"Crie um script Python que faça o seguinte: {prompt_usuario}")
+        response = await model.generate_content_async(f"Crie um script Python que faça o seguinte: {prompt_usuario}")
 
         if not response.parts:
             print("⚠️ Geração de código bloqueada ou retornou vazia.")
             return None
 
-        # Limpa a resposta para remover ```python e ``` do início e fim
         codigo_limpo = re.sub(r'^```python\s*|\s*```$', '', response.text.strip(), flags=re.MULTILINE)
 
         print("✅ Código recebido do Gemini.")
         return codigo_limpo
     except Exception as e:
         print(f"🤯 Erro ao chamar a API do Gemini (código): {e}")
+        return None
+
+
+async def alterar_codigo_com_gpt(codigo_anterior: str, pedido_de_alteracao: str) -> str:
+    """
+    Envia um código existente e um pedido de alteração para a IA.
+    """
+    print("🤖 Enviando prompt de alteração de código para o Google Gemini...")
+    try:
+        model = genai.GenerativeModel(
+            'gemini-1.5-flash-latest',
+            system_instruction=(
+                "Você é um assistente de programação especialista em Python. "
+                "Sua tarefa é modificar o código Python fornecido de acordo com o pedido do usuário. "
+                "Retorne APENAS o código Python completo e modificado. "
+                "Não inclua explicações, comentários desnecessários, ou a palavra 'python' no início do código."
+            )
+        )
+        prompt_completo = (
+            f"Aqui está um código Python:\n\n```python\n{codigo_anterior}\n```\n\n"
+            f"Por favor, modifique este código para fazer o seguinte: {pedido_de_alteracao}"
+        )
+        response = await model.generate_content_async(prompt_completo)
+
+        if not response.parts:
+            print("⚠️ Alteração de código bloqueada ou retornou vazia.")
+            return None
+
+        codigo_limpo = re.sub(r'^```python\s*|\s*```$', '', response.text.strip(), flags=re.MULTILINE)
+
+        print("✅ Código alterado recebido do Gemini.")
+        return codigo_limpo
+    except Exception as e:
+        print(f"🤯 Erro ao chamar a API do Gemini (alteração de código): {e}")
         return None

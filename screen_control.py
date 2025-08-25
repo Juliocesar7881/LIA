@@ -13,7 +13,7 @@ from utils.vision import encontrar_elementos_por_texto
 import cv2
 import numpy as np
 
-# --- DICIONÁRIO DE TECLAS (COM TECLAS DE MÍDIA) ---
+# --- DICIONÁRIO DE TECLAS (sem alterações) ---
 KEY_MAP = {
     'enter': 'enter', 'enviar': 'enter', 'confirma': 'enter', 'confirmar': 'enter',
     'espaço': 'space', 'space': 'space',
@@ -57,7 +57,43 @@ KEY_MAP = {
 }
 
 
-# --- NOVA FUNÇÃO ADICIONADA ---
+# --- NOVA FUNÇÃO PARA CLICAR EM IMAGENS ---
+def clicar_em_imagem(nome_imagem: str) -> bool:
+    """
+    Procura por uma imagem (ícone/botão) na tela e clica nela.
+
+    Args:
+        nome_imagem (str): O nome do arquivo da imagem (sem extensão) salvo na pasta 'image_targets'.
+
+    Returns:
+        bool: True se encontrou e clicou, False caso contrário.
+    """
+    try:
+        # Constrói o caminho completo para a imagem alvo
+        caminho_imagem = os.path.join('image_targets', f'{nome_imagem}.png')
+
+        if not os.path.exists(caminho_imagem):
+            print(f"❌ Imagem alvo não encontrada em: {caminho_imagem}")
+            return False
+
+        print(f"🖼️  Procurando pelo ícone '{nome_imagem}' na tela...")
+        # Usa o pyautogui para localizar a imagem no ecrã com uma certa confiança
+        posicao = pyautogui.locateCenterOnScreen(caminho_imagem, confidence=0.8)
+
+        if posicao:
+            print(f"✅ Ícone encontrado! Clicando em {posicao}...")
+            pyautogui.click(posicao)
+            return True
+        else:
+            print("❌ Ícone não encontrado na tela.")
+            return False
+
+    except Exception as e:
+        print(f"🤯 Erro ao tentar clicar na imagem: {e}")
+        return False
+
+
+# --- FUNÇÕES EXISTENTES (sem alterações) ---
 def is_youtube_active():
     """Verifica se a janela atualmente em foco é uma aba do YouTube."""
     try:
@@ -70,6 +106,7 @@ def is_youtube_active():
         return False
     return False
 
+
 def clicar_em_elemento(elemento):
     """Clica no centro de um elemento encontrado pela visão computacional."""
     try:
@@ -81,12 +118,10 @@ def clicar_em_elemento(elemento):
         print(f"🤯 Erro ao clicar no elemento: {e}")
         return False
 
-# --- FUNÇÕES YOUTUBE (VERSÃO CORRIGIDA E MAIS SIMPLES) ---
 
 def encontrar_abas_youtube():
     """
     Encontra todas as janelas visíveis que contenham "YouTube" no título.
-    Esta versão é mais simples e robusta, pois não depende de permissões para ler o nome do processo.
     """
     print("🔎 Procurando por abas do YouTube (método simplificado)...")
     abas_encontradas = []
@@ -114,13 +149,11 @@ def obter_url_da_aba(aba_info):
         janela = aba_info["janela"]
         print(f"🔗 Obtendo URL da aba: '{aba_info['titulo']}'")
 
-        # Traz a janela para frente
         if janela.is_minimized():
             janela.restore()
         janela.set_focus()
         time.sleep(0.5)
 
-        # Atalho para focar a barra de endereço e copiar
         pyautogui.hotkey('ctrl', 'l')
         time.sleep(0.2)
         pyautogui.hotkey('ctrl', 'c')
@@ -132,8 +165,6 @@ def obter_url_da_aba(aba_info):
         print(f"🤯 Erro ao obter URL da aba: {e}")
         return None
 
-
-# --- FUNÇÕES EXISTENTES ---
 
 def abrir_nova_aba():
     try:
@@ -398,4 +429,37 @@ def fechar_janela_por_nome(nome_janela_falado):
             return None, 0
     except Exception as e:
         print(f"🤯 Ocorreu um erro ao tentar fechar a janela: {e}")
+        return None, 0
+
+
+# --- NOVA FUNÇÃO PARA MINIMIZAR JANELAS ---
+def minimizar_janela_por_nome(nome_janela_falado):
+    print(f"🔎 Procurando por uma janela parecida com '{nome_janela_falado}' para minimizar...")
+    try:
+        desktop = Desktop(backend="win32")
+        janelas = desktop.windows()
+        if not janelas:
+            print("❌ Nenhuma janela aberta encontrada.")
+            return None, 0
+        melhor_match = {'janela': None, 'score': 0.0, 'titulo': ''}
+        for janela in janelas:
+            titulo = janela.window_text()
+            if titulo and "Program Manager" not in titulo and janela.is_visible() and not janela.is_minimized():
+                score = SequenceMatcher(None, nome_janela_falado.lower(), titulo.lower()).ratio()
+                if score > melhor_match['score']:
+                    melhor_match['score'] = score
+                    melhor_match['janela'] = janela
+                    melhor_match['titulo'] = titulo
+        if melhor_match['janela']:
+            janela_para_minimizar = melhor_match['janela']
+            titulo_real = melhor_match['titulo']
+            score_final = melhor_match['score']
+            print(f"✅ Melhor correspondência encontrada: '{titulo_real}' (Score: {score_final:.2f}). Minimizando...")
+            janela_para_minimizar.minimize()
+            return titulo_real, score_final
+        else:
+            print(f"❌ Nenhuma janela visível com título correspondente foi encontrada para minimizar.")
+            return None, 0
+    except Exception as e:
+        print(f"🤯 Ocorreu um erro ao tentar minimizar a janela: {e}")
         return None, 0
