@@ -5,6 +5,7 @@ import difflib
 from difflib import SequenceMatcher
 import yfinance as yf
 import feedparser
+import requests  # <-- NOVA IMPORTAÇÃO
 
 # --- DICIONÁRIO EXPANDIDO DE TICKERS (GLOBAL) ---
 TICKERS = {
@@ -163,6 +164,58 @@ TICKERS = {
 }
 
 
+# --- NOVA FUNÇÃO DE PREVISÃO DO TEMPO ---
+def obter_previsao_tempo(cidade: str) -> str:
+    """Busca a previsão do tempo atual para uma cidade usando a API do OpenWeatherMap."""
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    if not api_key:
+        return "A chave da API de previsão do tempo não foi configurada."
+
+    # Constrói a URL da API
+    url = f"https://api.openweathermap.org/data/2.5/weather?q={cidade}&appid={api_key}&units=metric&lang=pt_br"
+
+    try:
+        print(f"🌦️  Buscando previsão do tempo para: {cidade}")
+        response = requests.get(url)
+
+        if response.status_code != 200:
+            dados = response.json()
+            mensagem_erro = dados.get('message', 'erro desconhecido')
+            print(f"❌ Erro na API do OpenWeatherMap: {mensagem_erro}")
+            if response.status_code == 404:
+                return f"Desculpe, não consegui encontrar a cidade {cidade}."
+            elif response.status_code == 401:
+                return "A chave da API de previsão do tempo parece ser inválida. Verifique o arquivo .env."
+            else:
+                return "Desculpe, estou com problemas para acessar o serviço de previsão do tempo agora."
+
+        dados = response.json()
+
+        nome_cidade = dados['name']
+        descricao_clima = dados['weather'][0]['description']
+        temp_atual = dados['main']['temp']
+        sensacao_termica = dados['main']['feels_like']
+        temp_min = dados['main']['temp_min']
+        temp_max = dados['main']['temp_max']
+        umidade = dados['main']['humidity']
+
+        resposta = (
+            f"A previsão do tempo para {nome_cidade} agora é de {descricao_clima}, "
+            f"com temperatura atual de {temp_atual:.0f} graus e sensação térmica de {sensacao_termica:.0f} graus. "
+            f"A mínima para hoje é de {temp_min:.0f} e a máxima de {temp_max:.0f} graus. "
+            f"A humidade do ar está em {umidade}%."
+        )
+
+        return resposta
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erro de conexão ao buscar previsão do tempo: {e}")
+        return "Desculpe, estou sem conexão para verificar a previsão do tempo."
+    except Exception as e:
+        print(f"🤯 Erro inesperado ao processar previsão do tempo: {e}")
+        return "Ocorreu um erro inesperado ao buscar a previsão do tempo."
+
+
 # --- SUAS FUNÇÕES ORIGINAIS (MANTIDAS) ---
 
 def listar_todos_apps_acessiveis():
@@ -219,8 +272,6 @@ def encontrar_e_abrir_pasta(nome_pasta_falado):
         print(f"❌ Nenhuma pasta correspondente a '{nome_pasta_falado}' encontrada.")
         return None
 
-
-# --- NOVAS FUNÇÕES ADICIONADAS ---
 
 def obter_cotacao_acao(nome_ativo):
     nome_ativo = nome_ativo.lower().strip()

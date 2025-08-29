@@ -1,4 +1,4 @@
-# gpt_bridge.py (Com tratamento de respostas vazias/bloqueadas)
+# gpt_bridge.py
 
 import os
 import google.generativeai as genai
@@ -20,15 +20,36 @@ except Exception as e:
     print(f"🤯 Erro ao configurar a API do Gemini: {e}")
 
 
-async def perguntar_ao_gpt(mensagem_usuario):
+def _definir_personalidade(humor: int, contexto_memoria: str = "") -> str:
+    """Define a instrução de sistema com base no humor e no contexto da memória."""
+    instrucao_base = "Você é a assistente LISA."
+    if humor <= 25:
+        personalidade = "Responda de forma direta, clara, concisa e mais séria, como uma assistente profissional."
+    elif humor <= 75:
+        personalidade = "Responda de forma amigável e prestativa, mantendo um tom equilibrado."
+    else:  # humor > 75
+        personalidade = "Responda de forma bem-humorada, criativa e um pouco engraçada, usando toques de ironia ou piadas quando apropriado, mas sem deixar de ser útil."
+
+    instrucao_final = f"{instrucao_base} {personalidade}"
+
+    # Adiciona o contexto da memória, se existir
+    if contexto_memoria:
+        instrucao_final += f"\n\n--- CONTEXTO IMPORTANTE DE MEMÓRIAS RECENTES E FATOS SOBRE O USUÁRIO ---\n{contexto_memoria}\n--- FIM DO CONTEXTO ---"
+
+    return instrucao_final
+
+
+async def perguntar_ao_gpt(mensagem_usuario, humor_lisa: int, contexto_memoria: str = ""):
     """
-    Envia um prompt de TEXTO para o modelo Gemini e trata respostas vazias.
+    Envia um prompt de TEXTO para o modelo Gemini, agora com contexto de memória.
     """
-    print("🧠 Enviando prompt de texto para o Google Gemini...")
+    print(
+        f"🧠 Enviando prompt para o Google Gemini (Humor: {humor_lisa}%, Contexto: {'Sim' if contexto_memoria else 'Não'})...")
     try:
+        instrucao_sistema = _definir_personalidade(humor_lisa, contexto_memoria)
         model = genai.GenerativeModel(
             'gemini-1.5-flash-latest',
-            system_instruction="Você é a assistente LISA. Responda perguntas de forma direta e clara."
+            system_instruction=instrucao_sistema
         )
         response = await model.generate_content_async(mensagem_usuario)
 
@@ -41,6 +62,53 @@ async def perguntar_ao_gpt(mensagem_usuario):
     except Exception as e:
         print(f"🤯 Erro ao chamar a API do Gemini (texto): {e}")
         return "Desculpe, estou com problemas de conexão com minha IA."
+
+
+async def summarize_memories_with_gpt(memories_text: str):
+    """Envia um bloco de texto de memórias para ser resumido pela IA."""
+    try:
+        system_instruction = (
+            "Você é um especialista em análise de logs de conversas. Sua tarefa é ler a lista de eventos e conteúdos a seguir e "
+            "resumi-la em 2 ou 3 pontos chave e concisos. Extraia apenas as informações mais importantes sobre os interesses, "
+            "o contexto e os fatos principais sobre o usuário. Responda apenas com os pontos chave, de forma impessoal."
+        )
+        model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=system_instruction)
+        prompt = f"Analise e resuma os seguintes logs de interação com um usuário:\n\n{memories_text}"
+        response = await model.generate_content_async(prompt)
+
+        if not response.parts:
+            return ""
+        return response.text.strip()
+    except Exception as e:
+        print(f"🤯 Erro ao chamar a API do Gemini para resumir memórias: {e}")
+        return ""
+
+
+async def extrair_fatos_da_memoria(memories_text: str):
+    """Envia um bloco de memórias para a IA e pede para extrair fatos permanentes."""
+    try:
+        system_instruction = (
+            "Você é um analista de dados especialista em extrair informações nucleares de conversas. "
+            "Sua tarefa é ler os logs de interação a seguir e extrair APENAS fatos que parecem ser permanentes ou de longo prazo sobre o usuário. "
+            "Ignore informações temporárias (como perguntas sobre o tempo de hoje ou cotações de um dia específico). "
+            "Se um fato for aprendido, retorne-o em uma lista, onde cada fato está em uma nova linha e começa com um hífen. "
+            "Exemplos de BONS fatos a extrair: '- O nome do usuário é Loops', '- O usuário mora em Curitiba', '- O time de futebol do usuário é o Palmeiras'. "
+            "Exemplos de informações RUINS para IGNORAR: '- O usuário pediu uma piada', '- O usuário perguntou as notícias'. "
+            "Se nenhum fato permanente for encontrado, retorne uma resposta vazia."
+        )
+        model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=system_instruction)
+        prompt = f"Analise os seguintes logs e extraia os fatos permanentes:\n\n{memories_text}"
+        response = await model.generate_content_async(prompt)
+
+        if not response.parts:
+            return []
+
+        fatos = [line.strip().lstrip('-').strip() for line in response.text.strip().split('\n') if line.strip()]
+        return fatos
+
+    except Exception as e:
+        print(f"🤯 Erro ao chamar a API do Gemini para extrair fatos: {e}")
+        return []
 
 
 async def descrever_imagem(caminho_imagem, prompt_texto):

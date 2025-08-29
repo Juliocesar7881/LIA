@@ -1,4 +1,4 @@
-# main.py (Versão 100% completa com todas as funcionalidades)
+# main.py
 
 import asyncio
 import pyperclip
@@ -8,7 +8,12 @@ import re
 from datetime import datetime, timedelta
 import speech_recognition as sr
 import time
-import pyautogui  # <-- IMPORTAÇÃO CORRIGIDA
+import pyautogui
+
+# --- IMPORTAÇÕES ATUALIZADAS ---
+from config_manager import carregar_config, salvar_config
+from setup_window import criar_janela_setup
+from memory_manager import init_database, adicionar_memoria, limpar_memorias_antigas, gerar_resumo_da_memoria, consolidar_memorias
 
 from voice_control import falar, parar_fala, recognizer, mic, falar_rapido, tts_is_active
 from screen_control import (
@@ -20,7 +25,7 @@ from screen_control import (
     copiar_caminho_selecionado,
     colar,
     fechar_janela_por_nome,
-    minimizar_janela_por_nome,  # <-- NOVA IMPORTAÇÃO
+    minimizar_janela_por_nome,
     tirar_print,
     abrir_nova_aba,
     fechar_anuncio_na_tela,
@@ -31,11 +36,10 @@ from screen_control import (
     clicar_em_elemento,
     clicar_em_imagem
 )
-from utils.tools import encontrar_e_abrir_pasta, obter_cotacao_acao, obter_noticias_do_dia
+from utils.tools import encontrar_e_abrir_pasta, obter_cotacao_acao, obter_noticias_do_dia, obter_previsao_tempo
 from transcriber import transcrever_audio_copiado, extrair_caminho_do_clipboard
 from utils.vision import encontrar_elementos_por_texto
 from gpt_bridge import perguntar_ao_gpt, descrever_imagem
-from memory import registrar_evento
 from whatsapp_bot import enviar_mensagem_whatsapp
 from file_converter import converter_video_para_audio
 from youtube_downloader import baixar_media_youtube
@@ -43,6 +47,7 @@ from agenda_control import criar_alarme, listar_alarmes, remover_alarme
 from code_writer import gerar_codigo_e_abrir_no_navegador, alterar_codigo_e_abrir_no_navegador
 
 # --- Configurações e Funções Auxiliares ---
+config = None
 ativada = False
 loop_principal = None
 estado_conversa = {}
@@ -50,7 +55,8 @@ CONFIRMACOES_GERAIS = ["Ok.mp3", "Feito.mp3", "Sim.mp3", "Claro.mp3", "Beleza.mp
 CONFIRMACOES_ACAO = ["Ok.mp3", "Fechado.mp3"]
 alarmes_atuais = []
 ultimo_codigo_gerado = None
-ultima_resposta_gpt = None # <-- NOVO: Armazena a última resposta da IA
+ultima_resposta_gpt = None
+resumo_memoria_principal = ""
 
 
 def extrair_valor_numerico(texto):
@@ -87,11 +93,12 @@ def extrair_tempo_especifico_em_segundos(comando):
 
 async def cancelar_desligamento():
     os.system("shutdown -a");
-    registrar_evento("Agendamento cancelado.")
+    adicionar_memoria("acao", "Agendamento de desligamento cancelado.")
     await falar("Cancelado.")
 
 
 async def _iniciar_download(url, comando):
+    adicionar_memoria("acao", f"Iniciando download do YouTube: {url}")
     baixar_so_audio = "música" in comando or "áudio" in comando
     if baixar_so_audio:
         await falar(f"Ok, a baixar a música, por favor aguarde.")
@@ -103,8 +110,9 @@ async def _iniciar_download(url, comando):
 
 # --- Processador de Comandos ---
 async def processar_comando(comando):
-    global ativada, estado_conversa, alarmes_atuais, ultimo_codigo_gerado, ultima_resposta_gpt # <-- NOVO
+    global ativada, estado_conversa, alarmes_atuais, ultimo_codigo_gerado, ultima_resposta_gpt, config, resumo_memoria_principal
     comando = comando.strip().lower()
+    adicionar_memoria("conversa", f"Usuário disse: {comando}")
 
     # --- LÓGICA DE CONVERSA ---
     if estado_conversa.get('acao') == 'aguardando_confirmacao_desligar':
@@ -165,8 +173,44 @@ async def processar_comando(comando):
         "xiu", "shh", "parar", "pare", "chega", "basta", "já deu", "pode parar", "pause", "pausa"
     ]
     if any(palavra in comando for palavra in palavras_de_interrupcao):
-        registrar_evento("Comando de silêncio.");
+        adicionar_memoria("interrupcao", "Comando de silêncio recebido.")
         return
+
+    # --- COMANDO PARA ABRIR CONFIGURAÇÕES ---
+    gatilhos_config = ["configurar lisa", "configurações", "abrir configurações", "mudar configuração", "configurar"]
+    if any(gatilho in comando for gatilho in gatilhos_config):
+        adicionar_memoria("sistema", "Usuário pediu para abrir as configurações.")
+        await falar("Ok, abrindo as configurações. Faça as suas alterações e clique em 'Concluir' para salvar.")
+        loop = asyncio.get_running_loop()
+        # Roda a janela síncrona em uma thread separada para não bloquear o assistente
+        await loop.run_in_executor(None, criar_janela_setup)
+
+        # Recarrega a configuração após a janela ser fechada
+        nova_config = carregar_config()
+        if nova_config:
+            config = nova_config
+            await falar(f"Configurações atualizadas, {config.get('nome_usuario', 'usuário')}.")
+        else:
+            await falar("As configurações não foram salvas.")
+        return
+
+    # --- BLOCO DE PREVISÃO DO TEMPO ---
+    gatilhos_clima = ["previsão do tempo", "como está o tempo", "qual o clima", "temperatura em"]
+    for gatilho in gatilhos_clima:
+        if gatilho in comando:
+            cidade = comando.split(gatilho, 1)[-1].strip()
+            if cidade.startswith("para "): cidade = cidade[5:]
+            if cidade.startswith("em "): cidade = cidade[3:]
+
+            if not cidade:
+                cidade = "Joinville"
+                await falar(f"Mostrando a previsão para {cidade}, que é a sua cidade padrão.")
+
+            adicionar_memoria("acao", f"Usuário pediu previsão do tempo para '{cidade}'.")
+            previsao = obter_previsao_tempo(cidade)
+            ultima_resposta_gpt = previsao
+            await falar(previsao)
+            return
 
     # --- LÓGICA DE PROGRAMAÇÃO ---
     gatilhos_alterar_codigo = ["altere o código", "alterar o código", "modifique o código", "modifica o código",
@@ -215,7 +259,7 @@ async def processar_comando(comando):
     if comando in ["dormir", "fim", "desativar", "desativa", "desative"]:
         ativada = False;
         await falar("Até mais.");
-        registrar_evento("Assistente desativada.");
+        adicionar_memoria("estado", "Assistente foi desativada pelo usuário.")
         return
 
     if comando in ["desligar", "desliga"]:
@@ -226,6 +270,7 @@ async def processar_comando(comando):
     gatilhos_desligar_pc = ["desligar pc", "desligar o computador", "desligar máquina", "desligue o pc",
                             "desligue o computador", "encerrar o sistema", "encerrar", "shutdown"]
     if any(gatilho in comando for gatilho in gatilhos_desligar_pc) and "programar" not in comando:
+        adicionar_memoria("acao_critica", "Comando para desligar o computador recebido.")
         await falar("Desligando.");
         os.system("shutdown -s -t 1");
         return
@@ -335,7 +380,7 @@ async def processar_comando(comando):
     if any(gatilho in comando for gatilho in gatilhos_noticias):
         await falar("Buscando as últimas notícias...")
         noticias = obter_noticias_do_dia()
-        ultima_resposta_gpt = noticias # <-- NOVO
+        ultima_resposta_gpt = noticias
         await falar(noticias)
         return
 
@@ -360,7 +405,7 @@ async def processar_comando(comando):
         if caminho_do_print:
             prompt = "Descreva de forma concisa o que está visível nesta imagem da tela de um computador."
             descricao = await descrever_imagem(caminho_do_print, prompt)
-            ultima_resposta_gpt = descricao # <-- NOVO
+            ultima_resposta_gpt = descricao
             await falar(descricao)
         else:
             await falar("Desculpe, falhei ao tirar o print para analisar.")
@@ -376,7 +421,7 @@ async def processar_comando(comando):
         if caminho_da_imagem:
             prompt = "O que é esta imagem? Descreva-a para mim de forma concisa."
             descricao = await descrever_imagem(caminho_da_imagem, prompt)
-            ultima_resposta_gpt = descricao # <-- NOVO
+            ultima_resposta_gpt = descricao
             await falar(descricao)
         else:
             await falar("Não encontrei um caminho de imagem válido. Copie o arquivo da imagem e tente de novo.")
@@ -399,7 +444,7 @@ async def processar_comando(comando):
             if nome_ativo:
                 await falar(f"Buscando a cotação de {nome_ativo}, um momento...")
                 resultado = obter_cotacao_acao(nome_ativo)
-                ultima_resposta_gpt = resultado # <-- NOVO
+                ultima_resposta_gpt = resultado
                 await falar(resultado)
             else:
                 await falar("Por favor, diga o nome do ativo que você quer saber.")
@@ -485,12 +530,11 @@ async def processar_comando(comando):
                 await falar("Não encontrei um link válido.")
         return
 
-    # --- NOVO BLOCO PARA MINIMIZAR JANELAS ---
     gatilhos_minimizar = ["minimizar", "minimize a janela", "minimize"]
     for gatilho in gatilhos_minimizar:
         if comando.startswith(gatilho):
             alvo = comando.replace(gatilho, "", 1).strip()
-            if not alvo:  # Se o usuário só disse "minimizar"
+            if not alvo:
                 alvo = "janela atual"
                 pyautogui.hotkey('win', 'down')
                 await falar("Ok.")
@@ -525,7 +569,6 @@ async def processar_comando(comando):
                 await falar("Não encontrei.");
                 return
 
-    # Comandos de Ação Direta
     gatilhos_enviar = ["enviar", "envie", "mandar", "manda", "confirmar", "confirme", "envia", "mande", "confirma"]
     if comando in gatilhos_enviar:
         apertar_tecla('enter')
@@ -592,7 +635,6 @@ async def processar_comando(comando):
                 await falar(f"Não encontrei o ícone {nome_do_icone} na tela.")
             return
 
-    # Comandos com Argumento
     gatilhos_clique = ["clicar em", "clica em", "clique em"]
     for gatilho in gatilhos_clique:
         if comando.startswith(gatilho):
@@ -643,7 +685,6 @@ async def processar_comando(comando):
         rolar_tela("baixo");
         return
 
-    # --- NOVOS COMANDOS DE ANOTAÇÃO ---
     if comando in ["copiar resposta", "copiar a resposta"]:
         if ultima_resposta_gpt:
             pyperclip.copy(ultima_resposta_gpt)
@@ -657,22 +698,22 @@ async def processar_comando(comando):
             await falar("Ok, anotei a resposta para você.")
             pyperclip.copy(ultima_resposta_gpt)
             os.system("start notepad.exe")
-            await asyncio.sleep(1)  # Espera o Bloco de Notas abrir
+            await asyncio.sleep(1)
             pyautogui.hotkey('ctrl', 'v')
         else:
             await falar("Não há nenhuma resposta recente para anotar.")
         return
-    # --- FIM DOS NOVOS COMANDOS ---
 
-    # Se nada correspondeu, pergunta ao GPT
-    resposta = await perguntar_ao_gpt(comando)
-    ultima_resposta_gpt = resposta # <-- NOVO
+    # --- CHAMADA FINAL AO GPT ATUALIZADA PARA FASE 2 ---
+    resposta = await perguntar_ao_gpt(comando, config['humor_lisa'], contexto_memoria=resumo_memoria_principal)
+    ultima_resposta_gpt = resposta
+    adicionar_memoria("conversa", f"LISA respondeu: {resposta}")
     await falar(resposta)
 
 
 # --- Callback de Escuta e Função Main ---
 def callback_escuta(recognizer, audio):
-    global ativada, loop_principal
+    global ativada, loop_principal, config
     try:
         frase = recognizer.recognize_google(audio, language='pt-BR').lower()
         print(f"🗣️  Você disse: {frase}")
@@ -682,7 +723,9 @@ def callback_escuta(recognizer, audio):
             time.sleep(0.1)
         if not ativada and any(x in frase for x in ["lisa", "lissa", "ativar", "ativa"]):
             ativada = True
-            asyncio.run_coroutine_threadsafe(falar("Pois não?"), loop_principal)
+            adicionar_memoria("estado", "Assistente ativada.")
+            nome_usuario = config.get("nome_usuario", "usuário")
+            asyncio.run_coroutine_threadsafe(falar(f"Ativada para {nome_usuario}"), loop_principal)
         elif ativada:
             asyncio.run_coroutine_threadsafe(processar_comando(frase), loop_principal)
     except sr.UnknownValueError:
@@ -691,18 +734,46 @@ def callback_escuta(recognizer, audio):
         print(f"🤯 Erro inesperado no callback: {e}")
 
 
+# --- FUNÇÃO MAIN ATUALIZADA PARA FASE 2 ---
 async def main():
-    global loop_principal
+    global loop_principal, resumo_memoria_principal
     loop_principal = asyncio.get_event_loop()
+
+    # Gera o resumo da memória na inicialização, antes de começar a ouvir
+    if not resumo_memoria_principal:  # Garante que só rode uma vez
+        resumo_memoria_principal = await gerar_resumo_da_memoria()
+
     if not mic: print("❌ Microfone não encontrado."); return
     recognizer.listen_in_background(mic, callback_escuta, phrase_time_limit=5)
-    print("👋 Olá, eu sou a LISA. Diga 'LISA' para me ativar.")
+    print(f"\n👋 Olá, {config['nome_usuario']}! Eu sou a LISA. Diga 'LISA' para me ativar.")
+    print(f"   (Humor definido em {config['humor_lisa']}%)")
+    adicionar_memoria("sistema", "LISA iniciada com sucesso e ouvindo.")
     while True:
         await asyncio.sleep(1)
 
 
 if __name__ == "__main__":
+    # Inicializa o banco de dados e faz a limpeza de memórias antigas
+    init_database()
+    limpar_memorias_antigas()
+
+    # Carrega a configuração do usuário
+    config = carregar_config()
+
+    # Se não houver configuração, executa o setup de primeira vez
+    if config is None:
+        print("👋 Bem-vindo(a) à LISA! Parece que esta é a sua primeira vez.")
+        print("   Por favor, preencha as configurações na janela que abriu.")
+        criar_janela_setup()
+        config = carregar_config()
+        if config is None:
+            print("❌ A configuração não foi salva. Encerrando o programa.")
+            adicionar_memoria("erro", "Programa encerrado por falta de configuração.")
+            exit()
+
     try:
+        # Inicia o loop principal assíncrono
         asyncio.run(main())
     except KeyboardInterrupt:
+        adicionar_memoria("sistema", "Programa encerrado pelo usuário (KeyboardInterrupt).")
         print("\nPrograma encerrado.")
