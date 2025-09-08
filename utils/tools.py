@@ -5,7 +5,8 @@ import difflib
 from difflib import SequenceMatcher
 import yfinance as yf
 import feedparser
-import requests  # <-- NOVA IMPORTAÇÃO
+import requests
+from datetime import datetime, timedelta  # <-- NOVA IMPORTAÇÃO
 
 # --- DICIONÁRIO EXPANDIDO DE TICKERS (GLOBAL) ---
 TICKERS = {
@@ -164,56 +165,88 @@ TICKERS = {
 }
 
 
-# --- NOVA FUNÇÃO DE PREVISÃO DO TEMPO ---
-def obter_previsao_tempo(cidade: str) -> str:
-    """Busca a previsão do tempo atual para uma cidade usando a API do OpenWeatherMap."""
+# --- FUNÇÃO DE PREVISÃO DO TEMPO ATUALIZADA ---
+def obter_previsao_tempo(cidade: str, periodo: str = "hoje") -> str:
+    """Busca a previsão do tempo para hoje, amanhã ou para a semana."""
     api_key = os.getenv("OPENWEATHER_API_KEY")
     if not api_key:
         return "A chave da API de previsão do tempo não foi configurada."
 
-    # Constrói a URL da API
-    url = f"https://api.openweathermap.org/data/2.5/weather?q={cidade}&appid={api_key}&units=metric&lang=pt_br"
-
     try:
-        print(f"🌦️  Buscando previsão do tempo para: {cidade}")
-        response = requests.get(url)
+        if periodo == "hoje":
+            print(f"🌦️  Buscando previsão do tempo para HOJE em: {cidade}")
+            url = f"https://api.openweathermap.org/data/2.5/weather?q={cidade}&appid={api_key}&units=metric&lang=pt_br"
+            response = requests.get(url)
+            if response.status_code != 200:
+                dados_erro = response.json()
+                return f"Desculpe, não consegui encontrar a cidade {cidade}. Erro: {dados_erro.get('message', 'desconhecido')}."
 
-        if response.status_code != 200:
             dados = response.json()
-            mensagem_erro = dados.get('message', 'erro desconhecido')
-            print(f"❌ Erro na API do OpenWeatherMap: {mensagem_erro}")
-            if response.status_code == 404:
-                return f"Desculpe, não consegui encontrar a cidade {cidade}."
-            elif response.status_code == 401:
-                return "A chave da API de previsão do tempo parece ser inválida. Verifique o arquivo .env."
-            else:
-                return "Desculpe, estou com problemas para acessar o serviço de previsão do tempo agora."
+            nome_cidade = dados['name']
+            descricao_clima = dados['weather'][0]['description']
+            temp_atual = dados['main']['temp']
+            sensacao_termica = dados['main']['feels_like']
+            temp_min = dados['main']['temp_min']
+            temp_max = dados['main']['temp_max']
+            umidade = dados['main']['humidity']
 
-        dados = response.json()
+            return (
+                f"A previsão do tempo para {nome_cidade} agora é de {descricao_clima}, "
+                f"com temperatura atual de {temp_atual:.0f} graus e sensação térmica de {sensacao_termica:.0f} graus. "
+                f"A mínima para hoje é de {temp_min:.0f} e a máxima de {temp_max:.0f} graus. "
+                f"A umidade do ar está em {umidade}%."
+            )
 
-        nome_cidade = dados['name']
-        descricao_clima = dados['weather'][0]['description']
-        temp_atual = dados['main']['temp']
-        sensacao_termica = dados['main']['feels_like']
-        temp_min = dados['main']['temp_min']
-        temp_max = dados['main']['temp_max']
-        umidade = dados['main']['humidity']
+        elif periodo in ["amanha", "semana"]:
+            print(f"🌦️  Buscando previsão futura para '{periodo}' em: {cidade}")
+            url = f"https://api.openweathermap.org/data/2.5/forecast?q={cidade}&appid={api_key}&units=metric&lang=pt_br"
+            response = requests.get(url)
+            if response.status_code != 200:
+                dados_erro = response.json()
+                return f"Desculpe, não consegui encontrar a previsão futura para {cidade}. Erro: {dados_erro.get('message', 'desconhecido')}."
 
-        resposta = (
-            f"A previsão do tempo para {nome_cidade} agora é de {descricao_clima}, "
-            f"com temperatura atual de {temp_atual:.0f} graus e sensação térmica de {sensacao_termica:.0f} graus. "
-            f"A mínima para hoje é de {temp_min:.0f} e a máxima de {temp_max:.0f} graus. "
-            f"A humidade do ar está em {umidade}%."
-        )
+            dados = response.json()
+            nome_cidade = dados['city']['name']
+            lista_previsoes = dados['list']
 
-        return resposta
+            if periodo == "amanha":
+                amanha = (datetime.now() + timedelta(days=1)).date()
+                for previsao in lista_previsoes:
+                    data_previsao = datetime.fromtimestamp(previsao['dt']).date()
+                    if data_previsao == amanha:
+                        # Pega a previsão por volta do meio-dia para ser mais representativa
+                        if "12:00:00" in previsao['dt_txt']:
+                            descricao = previsao['weather'][0]['description']
+                            temp = previsao['main']['temp']
+                            return f"Amanhã em {nome_cidade}, a previsão é de {descricao} com temperatura por volta de {temp:.0f} graus."
+                return f"Não encontrei uma previsão específica para amanhã em {nome_cidade}."
+
+            elif periodo == "semana":
+                dias_semana = {}
+                for previsao in lista_previsoes:
+                    data = datetime.fromtimestamp(previsao['dt']).strftime('%Y-%m-%d')
+                    if data not in dias_semana:
+                        dias_semana[data] = {'min': [], 'max': [], 'desc': []}
+                    dias_semana[data]['min'].append(previsao['main']['temp_min'])
+                    dias_semana[data]['max'].append(previsao['main']['temp_max'])
+                    dias_semana[data]['desc'].append(previsao['weather'][0]['description'])
+
+                resposta = f"Aqui está a previsão para os próximos dias em {nome_cidade}... "
+                for data_str, valores in list(dias_semana.items())[:5]:
+                    data_obj = datetime.strptime(data_str, '%Y-%m-%d')
+                    nome_dia = data_obj.strftime("%A").replace("-feira", "")
+                    temp_min_dia = min(valores['min'])
+                    temp_max_dia = max(valores['max'])
+                    desc_comum = max(set(valores['desc']), key=valores['desc'].count)
+                    resposta += f"Para {nome_dia}: a previsão é de {desc_comum}, com mínima de {temp_min_dia:.0f} e máxima de {temp_max_dia:.0f} graus... "
+                return resposta
 
     except requests.exceptions.RequestException as e:
-        print(f"❌ Erro de conexão ao buscar previsão do tempo: {e}")
-        return "Desculpe, estou sem conexão para verificar a previsão do tempo."
+        return f"Desculpe, estou sem conexão para verificar a previsão do tempo. Erro: {e}"
     except Exception as e:
-        print(f"🤯 Erro inesperado ao processar previsão do tempo: {e}")
-        return "Ocorreu um erro inesperado ao buscar a previsão do tempo."
+        return f"Ocorreu um erro inesperado ao buscar a previsão do tempo. Erro: {e}"
+
+    return "Não consegui obter a previsão."
 
 
 # --- SUAS FUNÇÕES ORIGINAIS (MANTIDAS) ---
@@ -278,7 +311,6 @@ def obter_cotacao_acao(nome_ativo):
     ticker = TICKERS.get(nome_ativo)
 
     if not ticker:
-        # Tenta encontrar a melhor correspondência por similaridade
         nomes_conhecidos = list(TICKERS.keys())
         melhor_match = difflib.get_close_matches(nome_ativo, nomes_conhecidos, n=1, cutoff=0.7)
         if melhor_match:
@@ -297,10 +329,9 @@ def obter_cotacao_acao(nome_ativo):
         preco_atual = dados['Close'].iloc[-1]
         nome_completo = ativo.info.get('longName', nome_ativo.capitalize())
 
-        # Lógica aprimorada para definir a moeda
         if ".SA" in ticker:
             moeda = "reais"
-        else:  # Assume que tickers sem sufixo (.SA) ou com -USD são em dólares
+        else:
             moeda = "dólares"
 
         resposta = f"O valor atual de {nome_completo} é de {preco_atual:.2f} {moeda}."

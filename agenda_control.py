@@ -11,7 +11,7 @@ def _limpar_titulo_para_nome_tarefa(titulo: str) -> str:
     """Cria um nome de tarefa válido para o Windows a partir de um título."""
     titulo_limpo = re.sub(r'[\\/*?:"<>|]', "", titulo)
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    return f"LISA_Alarme_{titulo_limpo[:30].strip()}_{timestamp}"
+    return f"LIA_Alarme_{titulo_limpo[:30].strip()}_{timestamp}"
 
 
 def criar_alarme(titulo: str, data_hora: datetime) -> str:
@@ -54,12 +54,12 @@ def criar_alarme(titulo: str, data_hora: datetime) -> str:
 
 def listar_alarmes() -> list:
     """
-    Lista as tarefas de alarme agendadas pela LISA.
+    Lista as tarefas de alarme agendadas pela LIA.
     Retorna uma lista de dicionários, cada um com o título e o nome completo da tarefa.
     """
     try:
         # Usa /fo csv /v /nh para obter uma saída detalhada, sem cabeçalho e em formato CSV
-        comando = 'schtasks /query /fo csv /v /nh | findstr "LISA_Alarme_"'
+        comando = 'schtasks /query /fo csv /v /nh | findstr "LIA_Alarme_"'
         resultado = os.popen(comando).read()
 
         if not resultado:
@@ -74,7 +74,7 @@ def listar_alarmes() -> list:
                 nome_tarefa_completo = partes[1].strip('"').lstrip('\\')
                 proxima_execucao_str = partes[2].strip('"')
 
-                match = re.search(r'LISA_Alarme_(.*)_\d{14}', nome_tarefa_completo)
+                match = re.search(r'LIA_Alarme_(.*)_\d{14}', nome_tarefa_completo)
                 titulo = match.group(1) if match else "Alarme sem título"
 
                 data_valida = None

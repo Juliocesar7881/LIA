@@ -6,7 +6,7 @@ from datetime import datetime
 
 # A importação do gpt_bridge foi movida para as funções para evitar importação circular
 
-DB_FILE = "lisa_memory.db"
+DB_FILE = "lia_memory.db"
 
 
 def init_database():

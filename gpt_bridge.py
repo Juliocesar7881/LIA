@@ -22,7 +22,7 @@ except Exception as e:
 
 def _definir_personalidade(humor: int, contexto_memoria: str = "") -> str:
     """Define a instrução de sistema com base no humor e no contexto da memória."""
-    instrucao_base = "Você é a assistente LISA."
+    instrucao_base = "Você é a assistente LIA."
     if humor <= 25:
         personalidade = "Responda de forma direta, clara, concisa e mais séria, como uma assistente profissional."
     elif humor <= 75:
@@ -39,14 +39,14 @@ def _definir_personalidade(humor: int, contexto_memoria: str = "") -> str:
     return instrucao_final
 
 
-async def perguntar_ao_gpt(mensagem_usuario, humor_lisa: int, contexto_memoria: str = ""):
+async def perguntar_ao_gpt(mensagem_usuario, humor_lia: int, contexto_memoria: str = ""):
     """
     Envia um prompt de TEXTO para o modelo Gemini, agora com contexto de memória.
     """
     print(
-        f"🧠 Enviando prompt para o Google Gemini (Humor: {humor_lisa}%, Contexto: {'Sim' if contexto_memoria else 'Não'})...")
+        f"🧠 Enviando prompt para o Google Gemini (Humor: {humor_lia}%, Contexto: {'Sim' if contexto_memoria else 'Não'})...")
     try:
-        instrucao_sistema = _definir_personalidade(humor_lisa, contexto_memoria)
+        instrucao_sistema = _definir_personalidade(humor_lia, contexto_memoria)
         model = genai.GenerativeModel(
             'gemini-1.5-flash-latest',
             system_instruction=instrucao_sistema

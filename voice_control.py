@@ -83,7 +83,7 @@ def parar_fala():
     """
     if pygame.mixer.music.get_busy():
         pygame.mixer.music.stop()
-        print("🎤 Interrompendo a fala da LISA.")
+        print("🎤 Interrompendo a fala da LIA.")
     if tts_is_active.is_set():
         tts_is_active.clear()
 
@@ -97,7 +97,7 @@ async def falar(texto):
 
     parar_fala()
     texto_limpo = re.sub(r'[\*#\_`%&()]', '', str(texto))
-    print(f"LISA 🗣️: {texto_limpo}")
+    print(f"LIA 🗣️: {texto_limpo}")
     frases = re.split(r'(?<=[.!?])\s*', texto_limpo)
     frases_validas = [f for f in frases if f.strip()]
     if not frases_validas: return
@@ -113,7 +113,9 @@ async def falar(texto):
                     print("▶️ Produção de áudio interrompida.")
                     break
                 nome_audio = f"fala_temp_{random.randint(1000, 9999)}.mp3"
-                comunicador = edge_tts.Communicate(frase, "pt-BR-ThalitaMultilingualNeural")
+                # --- MUDANÇA AQUI ---
+                comunicador = edge_tts.Communicate(frase, "pt-BR-FranciscaNeural")
+                # --- FIM DA MUDANÇA ---
                 await comunicador.save(nome_audio)
                 await audio_queue.put(nome_audio)
         finally:

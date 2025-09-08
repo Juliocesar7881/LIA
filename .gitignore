@@ -9,9 +9,9 @@ venv/
 __pycache__/
 *.pyc
 
-# Arquivos gerados pela LISA
+# Arquivos gerados pela LIA
 fala_*.mp3
-lisa_logs.txt
+lia_logs.txt
 codigo_gerado.py
 
 # Arquivos do PyCharm

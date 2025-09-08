@@ -329,7 +329,9 @@ def apertar_tecla(tecla_falada):
 
 def tirar_print():
     try:
-        pasta_prints = os.path.join(os.path.expanduser('~'), 'Pictures', 'LISA_Prints')
+        # --- MUDANÇA AQUI ---
+        pasta_prints = os.path.join(os.path.expanduser('~'), 'Pictures', 'LIA-Prints')
+        # --- FIM DA MUDANÇA ---
         os.makedirs(pasta_prints, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         nome_arquivo = f"Print_{timestamp}.png"

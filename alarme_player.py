@@ -14,7 +14,9 @@ async def falar_alarme(texto: str):
     """
     try:
         nome_audio = "alarme_fala_temp.mp3"
-        comunicador = edge_tts.Communicate(texto, "pt-BR-ThalitaMultilingualNeural")
+        # --- MUDANÇA AQUI ---
+        comunicador = edge_tts.Communicate(texto, "pt-BR-FranciscaNeural")
+        # --- FIM DA MUDANÇA ---
         await comunicador.save(nome_audio)
 
         pygame.mixer.music.load(nome_audio)

@@ -24,7 +24,7 @@ if not os.path.exists(pasta_cache):
 async def gerar_arquivo(texto, caminho):
     """Gera um único arquivo de áudio."""
     try:
-        comunicador = edge_tts.Communicate(texto, "pt-BR-ThalitaMultilingualNeural")
+        comunicador = edge_tts.Communicate(texto, "pt-BR-FranciscaNeural")
         await comunicador.save(caminho)
         print(f"✅ Áudio para '{texto}' salvo como '{caminho}'")
     except Exception as e:

@@ -1,5 +1,3 @@
-# main.py
-
 import asyncio
 import pyperclip
 import random
@@ -9,12 +7,15 @@ from datetime import datetime, timedelta
 import speech_recognition as sr
 import time
 import pyautogui
+import queue
+import sys
+import traceback
 
 # --- IMPORTAÇÕES ATUALIZADAS ---
 from config_manager import carregar_config, salvar_config
 from setup_window import criar_janela_setup
-from memory_manager import init_database, adicionar_memoria, limpar_memorias_antigas, gerar_resumo_da_memoria, consolidar_memorias
-
+from memory_manager import init_database, adicionar_memoria, limpar_memorias_antigas, gerar_resumo_da_memoria
+from status_indicator import StatusIndicator
 from voice_control import falar, parar_fala, recognizer, mic, falar_rapido, tts_is_active
 from screen_control import (
     executar_acao_na_tela,
@@ -57,6 +58,19 @@ alarmes_atuais = []
 ultimo_codigo_gerado = None
 ultima_resposta_gpt = None
 resumo_memoria_principal = ""
+indicator_ui = None
+command_queue = queue.Queue()
+# --- 1. NOVA VARIÁVEL GLOBAL ---
+stop_listening = None
+
+
+async def abrir_janela_configuracoes():
+    """Função centralizada para abrir a janela de configurações."""
+    global config
+    adicionar_memoria("sistema", "Usuário pediu para abrir as configurações.")
+    await falar("Ok, abrindo as configurações. Faça as suas alterações e clique em 'Concluir' para salvar.")
+    if indicator_ui:
+        indicator_ui.schedule_main_thread_task(criar_janela_setup)
 
 
 def extrair_valor_numerico(texto):
@@ -108,19 +122,18 @@ async def _iniciar_download(url, comando):
     await falar(resultado)
 
 
-# --- Processador de Comandos ---
 async def processar_comando(comando):
     global ativada, estado_conversa, alarmes_atuais, ultimo_codigo_gerado, ultima_resposta_gpt, config, resumo_memoria_principal
     comando = comando.strip().lower()
     adicionar_memoria("conversa", f"Usuário disse: {comando}")
 
-    # --- LÓGICA DE CONVERSA ---
     if estado_conversa.get('acao') == 'aguardando_confirmacao_desligar':
         if "computador" in comando or "pc" in comando:
             await falar("Ok, desligando o computador.")
             os.system("shutdown -s -t 1")
-        elif "lisa" in comando or "assistente" in comando or "você" in comando:
+        elif "lia" in comando or "assistente" in comando or "você" in comando:
             ativada = False
+            loop_principal.call_soon_threadsafe(indicator_ui.set_inactive)
             await falar("Até mais.")
         else:
             await falar("Não entendi sua escolha. Operação cancelada.")
@@ -165,7 +178,6 @@ async def processar_comando(comando):
 
         estado_conversa = {}
         return
-    # --- FIM DA LÓGICA DE CONVERSA ---
 
     palavras_de_interrupcao = [
         "cala a boca", "cala", "cale", "calada", "cale-se", "quieta", "quieto",
@@ -176,43 +188,42 @@ async def processar_comando(comando):
         adicionar_memoria("interrupcao", "Comando de silêncio recebido.")
         return
 
-    # --- COMANDO PARA ABRIR CONFIGURAÇÕES ---
-    gatilhos_config = ["configurar lisa", "configurações", "abrir configurações", "mudar configuração", "configurar"]
+    gatilhos_config = ["configurar lia", "configurações", "abrir configurações", "mudar configuração", "configurar"]
     if any(gatilho in comando for gatilho in gatilhos_config):
-        adicionar_memoria("sistema", "Usuário pediu para abrir as configurações.")
-        await falar("Ok, abrindo as configurações. Faça as suas alterações e clique em 'Concluir' para salvar.")
-        loop = asyncio.get_running_loop()
-        # Roda a janela síncrona em uma thread separada para não bloquear o assistente
-        await loop.run_in_executor(None, criar_janela_setup)
-
-        # Recarrega a configuração após a janela ser fechada
-        nova_config = carregar_config()
-        if nova_config:
-            config = nova_config
-            await falar(f"Configurações atualizadas, {config.get('nome_usuario', 'usuário')}.")
-        else:
-            await falar("As configurações não foram salvas.")
+        await abrir_janela_configuracoes()
         return
 
-    # --- BLOCO DE PREVISÃO DO TEMPO ---
     gatilhos_clima = ["previsão do tempo", "como está o tempo", "qual o clima", "temperatura em"]
     for gatilho in gatilhos_clima:
         if gatilho in comando:
-            cidade = comando.split(gatilho, 1)[-1].strip()
-            if cidade.startswith("para "): cidade = cidade[5:]
-            if cidade.startswith("em "): cidade = cidade[3:]
+            periodo = "hoje"
+            if "amanhã" in comando:
+                periodo = "amanha"
+            elif "essa semana" in comando or "nesta semana" in comando:
+                periodo = "semana"
 
-            if not cidade:
-                cidade = "Joinville"
-                await falar(f"Mostrando a previsão para {cidade}, que é a sua cidade padrão.")
+            comando_sem_gatilho = comando.split(gatilho, 1)[-1].strip()
+            comando_sem_periodo = re.sub(
+                r'para (hoje|amanhã|essa semana|nesta semana)|(hoje|amanhã|essa semana|nesta semana)', '',
+                comando_sem_gatilho, flags=re.IGNORECASE).strip()
 
-            adicionar_memoria("acao", f"Usuário pediu previsão do tempo para '{cidade}'.")
-            previsao = obter_previsao_tempo(cidade)
+            cidade_extraida = comando_sem_periodo.replace("em", "").strip()
+
+            if not cidade_extraida:
+                cidade = config.get('cidade', 'São Paulo')
+                if periodo != "hoje":
+                    await falar(f"Mostrando a previsão para {periodo} em {cidade}, sua cidade padrão.")
+                else:
+                    await falar(f"Mostrando a previsão para {cidade}, sua cidade padrão.")
+            else:
+                cidade = cidade_extraida
+
+            adicionar_memoria("acao", f"Usuário pediu previsão do tempo para '{cidade}' para o período '{periodo}'.")
+            previsao = obter_previsao_tempo(cidade, periodo)
             ultima_resposta_gpt = previsao
             await falar(previsao)
             return
 
-    # --- LÓGICA DE PROGRAMAÇÃO ---
     gatilhos_alterar_codigo = ["altere o código", "alterar o código", "modifique o código", "modifica o código",
                                "adicione ao código"]
     for gatilho in gatilhos_alterar_codigo:
@@ -255,9 +266,9 @@ async def processar_comando(comando):
             await falar(resultado)
             return
 
-    # --- LÓGICA DE DESLIGAMENTO ---
     if comando in ["dormir", "fim", "desativar", "desativa", "desative"]:
         ativada = False;
+        loop_principal.call_soon_threadsafe(indicator_ui.set_inactive)
         await falar("Até mais.");
         adicionar_memoria("estado", "Assistente foi desativada pelo usuário.")
         return
@@ -275,7 +286,6 @@ async def processar_comando(comando):
         os.system("shutdown -s -t 1");
         return
 
-    # --- COMANDOS DE CONTROLE DE MÍDIA ---
     if any(palavra in comando for palavra in ["play", "pausar", "tocar", "continuar", "pausa"]):
         apertar_tecla('play/pause')
         return
@@ -315,7 +325,6 @@ async def processar_comando(comando):
         apertar_tecla('mudo')
         return
 
-    # --- BLOCO DE DESPERTADOR ---
     gatilhos_listar = ["quais são meus alarmes", "meus lembretes", "o que tenho agendado"]
     if any(gatilho in comando for gatilho in gatilhos_listar):
         alarmes_atuais = listar_alarmes()
@@ -366,7 +375,6 @@ async def processar_comando(comando):
             await falar(resultado)
             return
 
-    # --- Comandos de Navegação e Sistema ---
     gatilhos_nova_aba = ["abrir nova aba", "abre uma nova aba", "nova aba", "nova guia", "abre nova guia"]
     if any(gatilho in comando for gatilho in gatilhos_nova_aba):
         if abrir_nova_aba():
@@ -393,7 +401,6 @@ async def processar_comando(comando):
     if any(gatilho in comando for gatilho in gatilhos_print):
         if tirar_print(): falar_rapido("Feito.mp3"); return
 
-    # --- Comandos de Visão ---
     gatilhos_descrever_tela = ["descreva a tela", "o que você vê", "descreve o que você tá vendo", "analisar a tela",
                                "o que tem na tela",
                                "o que está na tela", "leia a tela", "lê a tela pra mim", "o que é isso",
@@ -436,7 +443,6 @@ async def processar_comando(comando):
             await falar("Não encontrei um anúncio para fechar.")
         return
 
-    # --- Comandos com Argumentos (Gatilhos) ---
     gatilhos_cotacao = ["qual a cotação de", "valor da ação da", "preço do"]
     for gatilho in gatilhos_cotacao:
         if comando.startswith(gatilho):
@@ -704,14 +710,12 @@ async def processar_comando(comando):
             await falar("Não há nenhuma resposta recente para anotar.")
         return
 
-    # --- CHAMADA FINAL AO GPT ATUALIZADA PARA FASE 2 ---
-    resposta = await perguntar_ao_gpt(comando, config['humor_lisa'], contexto_memoria=resumo_memoria_principal)
+    resposta = await perguntar_ao_gpt(comando, config['humor_lia'], contexto_memoria=resumo_memoria_principal)
     ultima_resposta_gpt = resposta
-    adicionar_memoria("conversa", f"LISA respondeu: {resposta}")
+    adicionar_memoria("conversa", f"LIA respondeu: {resposta}")
     await falar(resposta)
 
 
-# --- Callback de Escuta e Função Main ---
 def callback_escuta(recognizer, audio):
     global ativada, loop_principal, config
     try:
@@ -721,8 +725,9 @@ def callback_escuta(recognizer, audio):
             print("🎤 Interrompendo a fala atual para processar novo comando.")
             parar_fala()
             time.sleep(0.1)
-        if not ativada and any(x in frase for x in ["lisa", "lissa", "ativar", "ativa"]):
+        if not ativada and any(x in frase for x in ["lia", "ativar", "ativa"]):
             ativada = True
+            loop_principal.call_soon_threadsafe(indicator_ui.set_active)
             adicionar_memoria("estado", "Assistente ativada.")
             nome_usuario = config.get("nome_usuario", "usuário")
             asyncio.run_coroutine_threadsafe(falar(f"Ativada para {nome_usuario}"), loop_principal)
@@ -734,35 +739,65 @@ def callback_escuta(recognizer, audio):
         print(f"🤯 Erro inesperado no callback: {e}")
 
 
-# --- FUNÇÃO MAIN ATUALIZADA PARA FASE 2 ---
 async def main():
-    global loop_principal, resumo_memoria_principal
+    global loop_principal, resumo_memoria_principal, indicator_ui, stop_listening
     loop_principal = asyncio.get_event_loop()
 
-    # Gera o resumo da memória na inicialização, antes de começar a ouvir
-    if not resumo_memoria_principal:  # Garante que só rode uma vez
-        resumo_memoria_principal = await gerar_resumo_da_memoria()
+    print("🧠 Agendando resumo de memória para ser executado em segundo plano...")
+    asyncio.create_task(atualizar_resumo_memoria_em_background())
 
-    if not mic: print("❌ Microfone não encontrado."); return
-    recognizer.listen_in_background(mic, callback_escuta, phrase_time_limit=5)
-    print(f"\n👋 Olá, {config['nome_usuario']}! Eu sou a LISA. Diga 'LISA' para me ativar.")
-    print(f"   (Humor definido em {config['humor_lisa']}%)")
-    adicionar_memoria("sistema", "LISA iniciada com sucesso e ouvindo.")
-    while True:
-        await asyncio.sleep(1)
+    if not mic:
+        print("❌ Microfone não encontrado. Encerrando.")
+        return
+
+    # --- 2. CAPTURAR A FUNÇÃO DE PARAGEM ---
+    stop_listening = recognizer.listen_in_background(mic, callback_escuta, phrase_time_limit=5)
+
+    print(f"\n👋 Olá, {config['nome_usuario']}! Eu sou a LIA. Diga 'LIA' para me ativar.")
+    print(f"   (Humor definido em {config.get('humor_lia', 50)}%)")
+    adicionar_memoria("sistema", "LIA iniciada com sucesso e ouvindo.")
+
+    try:
+        print("🚀 Iniciando a interface gráfica do StatusIndicator...")
+        indicator_ui = StatusIndicator(command_queue)
+        print("✅ StatusIndicator inicializado com sucesso.")
+
+        print("🏁 Loop principal iniciado. A LIA está totalmente operacional.")
+        while True:
+            indicator_ui.update()
+            try:
+                command = command_queue.get_nowait()
+                if command == "open_settings":
+                    await abrir_janela_configuracoes()
+                elif command == "quit_app":
+                    print("👋 Encerrando LIA a partir do ícone.")
+                    break
+            except queue.Empty:
+                pass
+            await asyncio.sleep(0.01)
+
+    except Exception as e:
+        print("\n" + "=" * 50)
+        print("🚨 ERRO CRÍTICO NO LOOP PRINCIPAL 🚨")
+        print(f"Ocorreu um erro inesperado que fez a LIA parar: {e}")
+        traceback.print_exc()
+        print("=" * 50 + "\n")
+
+
+async def atualizar_resumo_memoria_em_background():
+    global resumo_memoria_principal
+    resumo_memoria_principal = await gerar_resumo_da_memoria()
+    print("✅ Resumo da memória carregado em segundo plano e pronto para uso.")
 
 
 if __name__ == "__main__":
-    # Inicializa o banco de dados e faz a limpeza de memórias antigas
     init_database()
     limpar_memorias_antigas()
 
-    # Carrega a configuração do usuário
     config = carregar_config()
 
-    # Se não houver configuração, executa o setup de primeira vez
     if config is None:
-        print("👋 Bem-vindo(a) à LISA! Parece que esta é a sua primeira vez.")
+        print("👋 Bem-vindo(a) à LIA! Parece que esta é a sua primeira vez.")
         print("   Por favor, preencha as configurações na janela que abriu.")
         criar_janela_setup()
         config = carregar_config()
@@ -772,8 +807,16 @@ if __name__ == "__main__":
             exit()
 
     try:
-        # Inicia o loop principal assíncrono
         asyncio.run(main())
     except KeyboardInterrupt:
         adicionar_memoria("sistema", "Programa encerrado pelo usuário (KeyboardInterrupt).")
         print("\nPrograma encerrado.")
+    finally:
+        print("🔚 Finalizando processos. O programa será encerrado agora.")
+        # --- 3. CHAMAR A FUNÇÃO DE PARAGEM ANTES DE SAIR ---
+        if stop_listening:
+            print("   -> Parando a escuta do microfone em segundo plano...")
+            stop_listening(wait_for_stop=False)
+        if 'indicator_ui' in globals() and indicator_ui:
+            indicator_ui.close()
+        sys.exit(0)
