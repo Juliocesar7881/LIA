@@ -7,9 +7,9 @@ import json
 
 
 class JanelaSetup(customtkinter.CTkToplevel):
-    def __init__(self, master=None, callback=None):  # Adicionado callback
+    def __init__(self, master=None, callback=None):
         super().__init__(master)
-        self.callback = callback  # Armazena o callback
+        self.callback = callback
 
         self.cidades_lista = []
         self._carregar_cidades()
@@ -25,15 +25,30 @@ class JanelaSetup(customtkinter.CTkToplevel):
         self.COR_ACCENT = "#0078D7"
 
         self.title("Bem-vindo(a) à LIA!")
-
-        self.geometry("500x560")
+        self.geometry("500x580")  # MODIFICADO: Altura ajustada para o novo item
 
         try:
-            icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
-            if os.path.exists(icon_path):
-                self.iconbitmap(icon_path)
+            # TESTE COM CAMINHO ABSOLUTO E EXPLÍCITO
+            path_absoluto = r"C:\Users\Luchini\PycharmProjects\Lisa\assets\icon_blue.ico"
+
+            print("\n--- INICIANDO TESTE DE CAMINHO ABSOLUTO ---")
+            print(f"Tentando carregar o ícone de: '{path_absoluto}'")
+
+            # Verificação crucial: o arquivo existe neste caminho exato?
+            if os.path.exists(path_absoluto):
+                print("✅ Arquivo encontrado no caminho absoluto.")
+                # Tentativa de carregar o ícone
+                self.iconbitmap(path_absoluto)
+                print("✅ Comando self.iconbitmap() executado. Verifique a janela.")
+            else:
+                print(
+                    "❌ ERRO CRÍTICO: O arquivo NÃO foi encontrado no caminho absoluto. Verifique se o caminho está 100% correto.")
+            print("--- FIM DO TESTE DE CAMINHO ABSOLUTO ---\n")
+
         except Exception as e:
-            print(f"Aviso: Não foi possível carregar o ícone. Erro: {e}")
+            # Se o arquivo existe mas dá erro ao carregar, o problema é o formato do arquivo.
+            print(f"❌ ERRO AO CARREGAR O ÍCONE: {e}")
+            print("Isso geralmente significa que o arquivo .ico não é válido ou está corrompido.")
 
         self.resizable(False, False)
         self.attributes('-topmost', True)
@@ -78,10 +93,22 @@ class JanelaSetup(customtkinter.CTkToplevel):
         self.label_slider = customtkinter.CTkLabel(self.frame, text="Equilibrada (50%)", font=self.FONT_PEQUENA)
         self.label_slider.pack(pady=(0, 20))
 
+        # Frame para organizar as caixas de seleção
+        checkbox_frame = customtkinter.CTkFrame(self.frame, fg_color="transparent")
+        checkbox_frame.pack(pady=10, fill="x", padx=35)
+
         self.lembrar_var = customtkinter.BooleanVar(value=True)
-        lembrar_check = customtkinter.CTkCheckBox(self.frame, text="Lembrar configuração", variable=self.lembrar_var,
+        lembrar_check = customtkinter.CTkCheckBox(checkbox_frame, text="Lembrar configuração",
+                                                  variable=self.lembrar_var,
                                                   font=self.FONT_NORMAL, fg_color=self.COR_ACCENT)
-        lembrar_check.pack(pady=10)
+        lembrar_check.pack(anchor="w", side="left")
+
+        # NOVO: Caixa de seleção para inicializar com o sistema
+        self.iniciar_sistema_var = customtkinter.BooleanVar(value=False)
+        iniciar_sistema_check = customtkinter.CTkCheckBox(checkbox_frame, text="Inicializar com o sistema",
+                                                          variable=self.iniciar_sistema_var,
+                                                          font=self.FONT_NORMAL, fg_color=self.COR_ACCENT)
+        iniciar_sistema_check.pack(anchor="w", side="right")
 
         botoes_frame = customtkinter.CTkFrame(self.frame, fg_color="transparent")
         botoes_frame.pack(fill="x", pady=(20, 20), side="bottom")
@@ -115,10 +142,19 @@ class JanelaSetup(customtkinter.CTkToplevel):
             base_path = os.path.dirname(__file__)
             caminho_arquivo = os.path.join(base_path, "utils", "cidades.json")
             with open(caminho_arquivo, 'r', encoding='utf-8') as f:
-                self.cidades_lista = json.load(f)
-            self.cidades_lista.sort()
+                dados = json.load(f)
+
+            lista_formatada = []
+            for estado in dados['estados']:
+                sigla_estado = estado['sigla']
+                for cidade in estado['cidades']:
+                    lista_formatada.append(f"{cidade}, {sigla_estado}")
+
+            lista_formatada.sort()
+            self.cidades_lista = lista_formatada
+
         except Exception as e:
-            messagebox.showerror("Erro de Arquivo", f"Não foi possível carregar 'cidades.json':\n{e}")
+            messagebox.showerror("Erro de Arquivo", f"Não foi possível carregar ou processar 'cidades.json':\n{e}")
             self.cidades_lista = []
 
     def _atualizar_sugestoes(self, *args):
@@ -184,6 +220,9 @@ class JanelaSetup(customtkinter.CTkToplevel):
         nome = self.nome_entry.get().strip()
         cidade = self.cidade_entry.get().strip()
 
+        # NOVO: Obtém o valor da nova caixa de seleção
+        iniciar_com_sistema = self.iniciar_sistema_var.get()
+
         if not nome:
             messagebox.showwarning("Nome Inválido", "Por favor, digite um nome antes de continuar.")
             self.nome_entry.focus()
@@ -197,9 +236,20 @@ class JanelaSetup(customtkinter.CTkToplevel):
             return
 
         if self.lembrar_var.get():
-            salvar_config(nome, self.humor_var.get(), cidade)
-            if self.callback:  # Se o callback existir, chame ele
-                self.callback()
+            # MODIFICADO: Passa o novo valor para a função de salvar
+            # Lembre-se de atualizar a função 'salvar_config' para aceitar este novo parâmetro
+            salvar_config(nome, self.humor_var.get(), cidade, iniciar_com_sistema)
+
+        # NOVO: Aqui você adicionaria a lógica para configurar a inicialização com o sistema
+        if iniciar_com_sistema:
+            # Exemplo: self.configurar_inicializacao_auto(ativar=True)
+            print("Configurando para iniciar com o sistema...")
+        else:
+            # Exemplo: self.configurar_inicializacao_auto(ativar=False)
+            print("Removendo da inicialização com o sistema...")
+
+        if self.callback:
+            self.callback()
         self.destroy()
 
     def _on_closing(self):
@@ -211,6 +261,6 @@ class JanelaSetup(customtkinter.CTkToplevel):
             self.attributes('-topmost', True)
 
 
-def criar_janela_setup(callback=None):  # Modificado para aceitar o callback
+def criar_janela_setup(callback=None):
     app = JanelaSetup(callback=callback)
     app.grab_set()

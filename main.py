@@ -70,6 +70,7 @@ async def recarregar_configuracoes_e_atualizar():
     global config
     print("Configurações salvas! Recarregando...")
     config = carregar_config()
+    # --- CORREÇÃO: Usando a chave padronizada "user_name" ---
     nome_usuario = config.get("user_name", "usuário")
     adicionar_memoria("sistema", "Configurações foram atualizadas em tempo de execução.")
     await falar(f"Prontinho, {nome_usuario}! Configurações atualizadas.")
@@ -215,10 +216,10 @@ async def processar_comando(comando):
         adicionar_memoria("interrupcao", "Comando de silêncio recebido.")
         return
 
-    gatilhos_config = ["configurar lia", "configurações", "mudar configuração", "configurar"]
+    gatilhos_config = ["configurar lia", "configurações", "abrir configurações", "mudar configuração", "configurar"]
     if any(gatilho in comando for gatilho in gatilhos_config):
         estado_conversa = {'acao': 'aguardando_confirmacao_configuracoes'}
-        await falar("Você quer abrir as configurações do Windows, ou da assistente?")
+        await falar("Você quer abrir as configurações do Windows ou da assistente?")
         return
 
     gatilhos_clima = ["previsão do tempo", "como está o tempo", "qual o clima", "temperatura em"]

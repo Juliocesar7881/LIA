@@ -18,7 +18,7 @@ class StatusIndicator:
         self._drag_start_y = 0
 
         try:
-            icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
+            icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
             self.icon_image = Image.open(icon_path).resize((64, 64), Image.Resampling.LANCZOS)
             self.icon_photo = ImageTk.PhotoImage(self.icon_image)
         except Exception as e:

@@ -4,35 +4,34 @@ import os
 
 CONFIG_FILE = "config.json"
 
-
 def carregar_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             try:
                 config_data = json.load(f)
-                # --- Sua Lógica de Migração (Mantida) ---
-                if "humor_lisa" in config_data and "humor_lia" not in config_data:
-                    config_data["humor_lia"] = config_data.pop("humor_lisa")
-
-                # --- Lógica de Migração para a Chave da Cidade ---
-                # Garante que o programa funcione mesmo com a chave antiga
-                if "cidade" in config_data and "cidade_padrao" not in config_data:
+                # Lógica para garantir compatibilidade com versões antigas do config.json
+                if "nome_usuario" in config_data:
+                    config_data["user_name"] = config_data.pop("nome_usuario")
+                if "humor_lia" in config_data:
+                    config_data["lia_personality"] = config_data.pop("humor_lia")
+                if "cidade" in config_data:
                     config_data["cidade_padrao"] = config_data.pop("cidade")
-
+                # Adiciona o valor padrão para a nova configuração, se ela não existir
+                if "iniciar_com_windows" not in config_data:
+                    config_data["iniciar_com_windows"] = False
                 return config_data
             except json.JSONDecodeError:
                 os.remove(CONFIG_FILE)
                 return None
     return None
 
-
-def salvar_config(nome_usuario, humor_lia, cidade):
+def salvar_config(nome_usuario, humor_lia, cidade, iniciar_com_windows):
+    # Adicionada a nova chave "iniciar_com_windows"
     config_data = {
-        "nome_usuario": nome_usuario,
-        "humor_lia": humor_lia,
-        # --- CORREÇÃO APLICADA AQUI ---
-        # A chave foi alterada para "cidade_padrao" para ser consistente com o main.py
-        "cidade_padrao": cidade
+        "user_name": nome_usuario,
+        "lia_personality": humor_lia,
+        "cidade_padrao": cidade,
+        "iniciar_com_windows": iniciar_com_windows
     }
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=4, ensure_ascii=False)

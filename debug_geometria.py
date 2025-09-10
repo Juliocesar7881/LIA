@@ -116,18 +116,12 @@ class AppDiagnostico(tk.Tk):
         self.info_label.config(text=info_text)
 
     def centralizar_janela(self):
-        """Tenta centralizar a janela usando o método padrão para referência."""
-        try:
-            self.update_idletasks()
-            width = self.winfo_width()
-            height = self.winfo_height()
-            screen_width = self.winfo_screenwidth()
-            screen_height = self.winfo_screenheight()
-            x = (screen_width // 2) - (width // 2)
-            y = (screen_height // 2) - (height // 2)
-            self.geometry(f"{width}x{height}+{x}+{y}")
-        except Exception:
-            pass  # A centralização é secundária aqui.
+        self.update_idletasks()
+        width = self.winfo_width()
+        height = self.winfo_height()
+        x_pos = (self.winfo_screenwidth() // 2) - (width // 2)
+        y_pos = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f'{width}x{height}+{x_pos}+{y_pos}')
 
 
 if __name__ == "__main__":
