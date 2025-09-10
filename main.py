@@ -11,8 +11,8 @@ import queue
 import sys
 import traceback
 
-# --- IMPORTAÇÕES ATUALIZADAS ---
-from config_manager import carregar_config, salvar_config
+# --- IMPORTAÇÕES ---
+from config_manager import carregar_config
 from setup_window import criar_janela_setup
 from memory_manager import init_database, adicionar_memoria, limpar_memorias_antigas, gerar_resumo_da_memoria
 from status_indicator import StatusIndicator
@@ -47,7 +47,7 @@ from youtube_downloader import baixar_media_youtube
 from agenda_control import criar_alarme, listar_alarmes, remover_alarme
 from code_writer import gerar_codigo_e_abrir_no_navegador, alterar_codigo_e_abrir_no_navegador
 
-# --- Configurações e Funções Auxiliares ---
+# --- Configurações e Variáveis Globais ---
 config = None
 ativada = False
 loop_principal = None
@@ -60,18 +60,34 @@ ultima_resposta_gpt = None
 resumo_memoria_principal = ""
 indicator_ui = None
 command_queue = queue.Queue()
-# --- 1. NOVA VARIÁVEL GLOBAL ---
 stop_listening = None
 
 
-async def abrir_janela_configuracoes():
-    """Função centralizada para abrir a janela de configurações."""
-    global config
-    adicionar_memoria("sistema", "Usuário pediu para abrir as configurações.")
-    await falar("Ok, abrindo as configurações. Faça as suas alterações e clique em 'Concluir' para salvar.")
-    if indicator_ui:
-        indicator_ui.schedule_main_thread_task(criar_janela_setup)
+# --- Funções de Callback e Configuração ---
 
+async def recarregar_configuracoes_e_atualizar():
+    """Recarrega o arquivo de configuração e atualiza a variável global."""
+    global config
+    print("Configurações salvas! Recarregando...")
+    config = carregar_config()
+    nome_usuario = config.get("user_name", "usuário")
+    adicionar_memoria("sistema", "Configurações foram atualizadas em tempo de execução.")
+    await falar(f"Prontinho, {nome_usuario}! Configurações atualizadas.")
+
+def agendar_recarregamento():
+    """Função síncrona que agenda a corrotina de recarregamento no loop de eventos."""
+    if loop_principal and loop_principal.is_running():
+        asyncio.run_coroutine_threadsafe(recarregar_configuracoes_e_atualizar(), loop_principal)
+
+async def abrir_janela_configuracoes_lia():
+    """Função centralizada para abrir a janela de configurações da LIA."""
+    adicionar_memoria("sistema", "Usuário pediu para abrir as configurações da LIA.")
+    await falar("Ok, abrindo as minhas configurações. Faça as suas alterações e clique em 'Concluir' para salvar.")
+    if indicator_ui:
+        indicator_ui.schedule_main_thread_task(lambda: criar_janela_setup(callback=agendar_recarregamento))
+
+
+# --- Funções Auxiliares ---
 
 def extrair_valor_numerico(texto):
     match = re.search(r'\d+', texto)
@@ -126,6 +142,17 @@ async def processar_comando(comando):
     global ativada, estado_conversa, alarmes_atuais, ultimo_codigo_gerado, ultima_resposta_gpt, config, resumo_memoria_principal
     comando = comando.strip().lower()
     adicionar_memoria("conversa", f"Usuário disse: {comando}")
+
+    if estado_conversa.get('acao') == 'aguardando_confirmacao_configuracoes':
+        if any(termo in comando for termo in ["windows", "do windows", "sistema"]):
+            await falar("Ok, abrindo as configurações do Windows.")
+            os.system("start ms-settings:")
+        elif any(termo in comando for termo in ["assistente", "lia", "sua", "suas"]):
+            await abrir_janela_configuracoes_lia()
+        else:
+            await falar("Não entendi sua escolha. Operação cancelada.")
+        estado_conversa = {}
+        return
 
     if estado_conversa.get('acao') == 'aguardando_confirmacao_desligar':
         if "computador" in comando or "pc" in comando:
@@ -188,9 +215,10 @@ async def processar_comando(comando):
         adicionar_memoria("interrupcao", "Comando de silêncio recebido.")
         return
 
-    gatilhos_config = ["configurar lia", "configurações", "abrir configurações", "mudar configuração", "configurar"]
+    gatilhos_config = ["configurar lia", "configurações", "mudar configuração", "configurar"]
     if any(gatilho in comando for gatilho in gatilhos_config):
-        await abrir_janela_configuracoes()
+        estado_conversa = {'acao': 'aguardando_confirmacao_configuracoes'}
+        await falar("Você quer abrir as configurações do Windows, ou da assistente?")
         return
 
     gatilhos_clima = ["previsão do tempo", "como está o tempo", "qual o clima", "temperatura em"]
@@ -209,8 +237,9 @@ async def processar_comando(comando):
 
             cidade_extraida = comando_sem_periodo.replace("em", "").strip()
 
+            cidade_padrao = config.get('cidade_padrao', 'São Paulo')
             if not cidade_extraida:
-                cidade = config.get('cidade', 'São Paulo')
+                cidade = cidade_padrao
                 if periodo != "hoje":
                     await falar(f"Mostrando a previsão para {periodo} em {cidade}, sua cidade padrão.")
                 else:
@@ -710,7 +739,7 @@ async def processar_comando(comando):
             await falar("Não há nenhuma resposta recente para anotar.")
         return
 
-    resposta = await perguntar_ao_gpt(comando, config['humor_lia'], contexto_memoria=resumo_memoria_principal)
+    resposta = await perguntar_ao_gpt(comando, config.get('lia_personality', 50), contexto_memoria=resumo_memoria_principal)
     ultima_resposta_gpt = resposta
     adicionar_memoria("conversa", f"LIA respondeu: {resposta}")
     await falar(resposta)
@@ -729,7 +758,7 @@ def callback_escuta(recognizer, audio):
             ativada = True
             loop_principal.call_soon_threadsafe(indicator_ui.set_active)
             adicionar_memoria("estado", "Assistente ativada.")
-            nome_usuario = config.get("nome_usuario", "usuário")
+            nome_usuario = config.get("user_name", "usuário")
             asyncio.run_coroutine_threadsafe(falar(f"Ativada para {nome_usuario}"), loop_principal)
         elif ativada:
             asyncio.run_coroutine_threadsafe(processar_comando(frase), loop_principal)
@@ -750,11 +779,11 @@ async def main():
         print("❌ Microfone não encontrado. Encerrando.")
         return
 
-    # --- 2. CAPTURAR A FUNÇÃO DE PARAGEM ---
     stop_listening = recognizer.listen_in_background(mic, callback_escuta, phrase_time_limit=5)
 
-    print(f"\n👋 Olá, {config['nome_usuario']}! Eu sou a LIA. Diga 'LIA' para me ativar.")
-    print(f"   (Humor definido em {config.get('humor_lia', 50)}%)")
+    nome_usuario = config.get("user_name", "usuário")
+    print(f"\n👋 Olá, {nome_usuario}! Eu sou a LIA. Diga 'LIA' para me ativar.")
+    print(f"   (Humor definido em {config.get('lia_personality', 50)}%)")
     adicionar_memoria("sistema", "LIA iniciada com sucesso e ouvindo.")
 
     try:
@@ -768,7 +797,7 @@ async def main():
             try:
                 command = command_queue.get_nowait()
                 if command == "open_settings":
-                    await abrir_janela_configuracoes()
+                    await abrir_janela_configuracoes_lia()
                 elif command == "quit_app":
                     print("👋 Encerrando LIA a partir do ícone.")
                     break
@@ -799,7 +828,7 @@ if __name__ == "__main__":
     if config is None:
         print("👋 Bem-vindo(a) à LIA! Parece que esta é a sua primeira vez.")
         print("   Por favor, preencha as configurações na janela que abriu.")
-        criar_janela_setup()
+        criar_janela_setup(callback=agendar_recarregamento)
         config = carregar_config()
         if config is None:
             print("❌ A configuração não foi salva. Encerrando o programa.")
@@ -813,7 +842,6 @@ if __name__ == "__main__":
         print("\nPrograma encerrado.")
     finally:
         print("🔚 Finalizando processos. O programa será encerrado agora.")
-        # --- 3. CHAMAR A FUNÇÃO DE PARAGEM ANTES DE SAIR ---
         if stop_listening:
             print("   -> Parando a escuta do microfone em segundo plano...")
             stop_listening(wait_for_stop=False)
