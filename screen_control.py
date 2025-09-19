@@ -12,6 +12,7 @@ from utils.tools import listar_todos_apps_acessiveis, encontrar_app_por_nome
 from utils.vision import encontrar_elementos_por_texto
 import cv2
 import numpy as np
+import subprocess  # <-- IMPORTAÇÃO ADICIONADA PARA A NOVA FUNÇÃO
 
 # --- DICIONÁRIO DE TECLAS (sem alterações) ---
 KEY_MAP = {
@@ -465,3 +466,35 @@ def minimizar_janela_por_nome(nome_janela_falado):
     except Exception as e:
         print(f"🤯 Ocorreu um erro ao tentar minimizar a janela: {e}")
         return None, 0
+
+
+# --- NOVA FUNÇÃO ADICIONADA ---
+def abrir_pasta_prints():
+    """
+    Abre a pasta de prints e seleciona o arquivo mais recente.
+    Retorna True se bem-sucedido, False caso contrário.
+    """
+    try:
+        # Garante que o caminho seja o mesmo da função tirar_print
+        prints_path = os.path.join(os.path.expanduser('~'), 'Pictures', 'LIA-Prints')
+
+        if not os.path.exists(prints_path) or not os.listdir(prints_path):
+            print("❌ Pasta de prints não encontrada ou está vazia.")
+            return False
+
+        # Encontra o arquivo mais recente na pasta
+        arquivos = [os.path.join(prints_path, f) for f in os.listdir(prints_path)]
+        arquivo_mais_recente = max(arquivos, key=os.path.getctime)
+
+        print(f"📂 Abrindo a pasta e selecionando: {arquivo_mais_recente}")
+
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Removido o 'check=True' para que o comando não gere um erro caso o explorer
+        # retorne um status de saída diferente de zero, mesmo funcionando.
+        subprocess.run(f'explorer /select,"{arquivo_mais_recente}"')
+        # --- FIM DA CORREÇÃO ---
+
+        return True
+    except Exception as e:
+        print(f"❌ Erro ao abrir a pasta de prints: {e}")
+        return False

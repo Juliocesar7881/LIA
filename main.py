@@ -28,6 +28,7 @@ from screen_control import (
     fechar_janela_por_nome,
     minimizar_janela_por_nome,
     tirar_print,
+    abrir_pasta_prints,
     abrir_nova_aba,
     fechar_anuncio_na_tela,
     fechar_aba_por_nome,
@@ -70,15 +71,16 @@ async def recarregar_configuracoes_e_atualizar():
     global config
     print("Configurações salvas! Recarregando...")
     config = carregar_config()
-    # --- CORREÇÃO: Usando a chave padronizada "user_name" ---
     nome_usuario = config.get("user_name", "usuário")
     adicionar_memoria("sistema", "Configurações foram atualizadas em tempo de execução.")
     await falar(f"Prontinho, {nome_usuario}! Configurações atualizadas.")
+
 
 def agendar_recarregamento():
     """Função síncrona que agenda a corrotina de recarregamento no loop de eventos."""
     if loop_principal and loop_principal.is_running():
         asyncio.run_coroutine_threadsafe(recarregar_configuracoes_e_atualizar(), loop_principal)
+
 
 async def abrir_janela_configuracoes_lia():
     """Função centralizada para abrir a janela de configurações da LIA."""
@@ -222,32 +224,18 @@ async def processar_comando(comando):
         await falar("Você quer abrir as configurações do Windows ou da assistente?")
         return
 
-        # No arquivo: main.py
-
-        # No arquivo: main.py
-
     gatilhos_clima = ["previsão do tempo", "como está o tempo", "qual o clima", "temperatura em"]
     for gatilho in gatilhos_clima:
         if gatilho in comando:
             periodo = "hoje"
-
-            # --- CORREÇÃO APLICADA AQUI ---
-            # Lógica aprimorada para detectar o período
-
-            # Palavras-chave completas para "semana"
             periodos_semana = ["essa semana", "nesta semana", "dessa semana", "desta semana"]
-            # Finais de frase incompletos que também indicam "semana"
             terminos_semana = [" para essa", " dessa", " para esta", " desta"]
-
             if "amanhã" in comando:
                 periodo = "amanha"
-            # Verifica tanto as palavras-chave completas quanto os finais de frase
             elif any(termo in comando for termo in periodos_semana) or any(
                     comando.endswith(termo) for termo in terminos_semana):
                 periodo = "semana"
-            # --- FIM DA CORREÇÃO ---
 
-            # Lógica robusta para extrair o nome da cidade (mantida da correção anterior)
             period_keywords = [
                 'para hoje', 'hoje', 'para amanhã', 'amanhã',
                 'para essa semana', 'essa semana', 'para nesta semana', 'nesta semana',
@@ -256,14 +244,10 @@ async def processar_comando(comando):
             temp_comando = comando.replace(gatilho, '', 1)
             for keyword in period_keywords:
                 temp_comando = re.sub(r'\b' + re.escape(keyword) + r'\b', '', temp_comando, flags=re.IGNORECASE)
-
-            # Adicionalmente, remove os finais de frase para limpar o nome da cidade
             for termino in terminos_semana:
                 if temp_comando.endswith(termino):
                     temp_comando = temp_comando[:-len(termino)]
-
             cidade_extraida = temp_comando.replace("em", "").strip()
-
             cidade_padrao = config.get('cidade_padrao', 'São Paulo')
             if not cidade_extraida:
                 cidade = cidade_padrao
@@ -273,9 +257,7 @@ async def processar_comando(comando):
                     await falar(f"Mostrando a previsão para {cidade}, sua cidade padrão.")
             else:
                 cidade = cidade_extraida
-
-            adicionar_memoria("acao",
-                              f"Usuário pediu previsão do tempo para '{cidade}' para o período '{periodo}'.")
+            adicionar_memoria("acao", f"Usuário pediu previsão do tempo para '{cidade}' para o período '{periodo}'.")
             previsao = obter_previsao_tempo(cidade, periodo)
             ultima_resposta_gpt = previsao
             await falar(previsao)
@@ -288,12 +270,10 @@ async def processar_comando(comando):
             if not ultimo_codigo_gerado:
                 await falar("Não há nenhum código na memória para alterar. Por favor, crie um código primeiro.")
                 return
-
             pedido_de_alteracao = comando.split(gatilho, 1)[-1].strip()
             if not pedido_de_alteracao:
                 await falar("Ok, o que você gostaria de alterar ou adicionar?")
                 return
-
             await falar(
                 f"Entendido. Ainda estou a aprender a programar, por isso considere esta uma função beta. Modificando o código para {pedido_de_alteracao}. Um momento...")
             resultado, novo_codigo = await alterar_codigo_e_abrir_no_navegador(ultimo_codigo_gerado,
@@ -310,11 +290,9 @@ async def processar_comando(comando):
             descricao_do_codigo = comando.split(gatilho, 1)[-1].strip()
             if "para" in descricao_do_codigo.lower().split()[0]:
                 descricao_do_codigo = descricao_do_codigo.split("para", 1)[-1].strip()
-
             if not descricao_do_codigo:
                 await falar("Claro, o que você quer que eu programe?")
                 return
-
             await falar(
                 f"Ok. Ainda estou a aprender a programar, por isso considere esta uma função beta. Preparando um ambiente para {descricao_do_codigo}. Um momento...")
             resultado, codigo_gerado = await gerar_codigo_e_abrir_no_navegador(descricao_do_codigo)
@@ -453,7 +431,22 @@ async def processar_comando(comando):
         await cancelar_desligamento();
         return
 
-    gatilhos_print = ["tirar print", "tira print", "printar a tela", "printa a tela", "print", "capturar tela",
+    # --- CORREÇÃO DE ORDEM ---
+    # O bloco "abrir prints" foi movido para ANTES do bloco "tirar print" para evitar conflito de palavras-chave.
+    gatilhos_abrir_prints = ["abrir prints", "abrir prin", "abrir print", "mostrar prints", "mostrar prin",
+                             "mostrar print", "pasta de print", "pasta de prin", "pasta de prints", "último print",
+                             "último prin"]
+    if any(gatilho in comando for gatilho in gatilhos_abrir_prints):
+        if abrir_pasta_prints():
+            # A resposta foi alterada para "Aberto."
+            await falar("Aberto.")
+        else:
+            await falar("Ainda não tirei nenhum print para mostrar.")
+        return
+    # --- FIM DA CORREÇÃO ---
+
+    gatilhos_print = ["tirar print", "tira print", "tira prin", "printar a tela", "printa a tela", "print",
+                      "capturar tela",
                       "captura de tela", "faz um print", "bater um print", "fotografar a tela"]
     if any(gatilho in comando for gatilho in gatilhos_print):
         if tirar_print(): falar_rapido("Feito.mp3"); return
@@ -767,7 +760,8 @@ async def processar_comando(comando):
             await falar("Não há nenhuma resposta recente para anotar.")
         return
 
-    resposta = await perguntar_ao_gpt(comando, config.get('lia_personality', 50), contexto_memoria=resumo_memoria_principal)
+    resposta = await perguntar_ao_gpt(comando, config.get('lia_personality', 50),
+                                      contexto_memoria=resumo_memoria_principal)
     ultima_resposta_gpt = resposta
     adicionar_memoria("conversa", f"LIA respondeu: {resposta}")
     await falar(resposta)
