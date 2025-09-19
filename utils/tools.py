@@ -1,4 +1,4 @@
-# utils/tools.py (Versão completa com lista global e massiva de ativos)
+# utils/tools.py (Versão completa com a correção do .env)
 
 import os
 import difflib
@@ -6,7 +6,11 @@ from difflib import SequenceMatcher
 import yfinance as yf
 import feedparser
 import requests
-from datetime import datetime, timedelta  # <-- NOVA IMPORTAÇÃO
+from datetime import datetime, timedelta
+from dotenv import load_dotenv  # <-- ADICIONADO PARA LER O .env
+
+# Carrega as variáveis de ambiente do arquivo .env no início do script
+load_dotenv()
 
 # --- DICIONÁRIO EXPANDIDO DE TICKERS (GLOBAL) ---
 TICKERS = {
@@ -110,9 +114,9 @@ TICKERS = {
     "btg pactual": "BPAC11.SA",
     "hapvida": "HAPV3.SA",
     "inter": "INBR32.SA", "banco inter": "INBR32.SA",
-    "kering": "KER.PA",  # Exemplo de ação europeia (Gucci)
+    "kering": "KER.PA",
 
-    # --- Criptomoedas Populares (Top 50+) ---
+    # --- Criptomoedas Populares ---
     "bitcoin": "BTC-USD",
     "ethereum": "ETH-USD",
     "tether": "USDT-USD",
@@ -165,88 +169,81 @@ TICKERS = {
 }
 
 
-# --- FUNÇÃO DE PREVISÃO DO TEMPO ATUALIZADA ---
-def obter_previsao_tempo(cidade: str, periodo: str = "hoje") -> str:
-    """Busca a previsão do tempo para hoje, amanhã ou para a semana."""
+# --- FUNÇÃO DE PREVISÃO DO TEMPO CORRIGIDA ---
+def obter_previsao_tempo(cidade, periodo="hoje"):
+    """
+    Busca a previsão do tempo para uma cidade, carregando a API key do arquivo .env
+    e usando a URL HTTPS correta.
+    """
+    cidade_api = cidade.split(',')[0].strip()
+    print(f"🌦️  Buscando previsão do tempo para {periodo.upper()} em: {cidade_api}")
+
+    # --- CORREÇÃO 1: Carrega a chave correta do ambiente ---
     api_key = os.getenv("OPENWEATHER_API_KEY")
     if not api_key:
-        return "A chave da API de previsão do tempo não foi configurada."
+        print("❌ ERRO: A chave da API OPENWEATHER_API_KEY não foi encontrada no arquivo .env.")
+        return "Desculpe, a chave para o serviço de meteorologia não foi configurada."
+
+    # --- CORREÇÃO 2: Usa HTTPS na URL, que é obrigatório ---
+    base_url = "https://api.openweathermap.org/data/2.5/forecast"
+
+    params = {
+        'q': cidade_api,
+        'appid': api_key,
+        'units': 'metric',
+        'lang': 'pt_br'
+    }
 
     try:
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if str(data.get("cod")) != "200":
+            return f"Desculpe, não consegui encontrar a cidade {cidade_api}. Erro: {data.get('message', 'desconhecido')}."
+
         if periodo == "hoje":
-            print(f"🌦️  Buscando previsão do tempo para HOJE em: {cidade}")
-            url = f"https://api.openweathermap.org/data/2.5/weather?q={cidade}&appid={api_key}&units=metric&lang=pt_br"
-            response = requests.get(url)
-            if response.status_code != 200:
-                dados_erro = response.json()
-                return f"Desculpe, não consegui encontrar a cidade {cidade}. Erro: {dados_erro.get('message', 'desconhecido')}."
+            previsao_hoje = data['list'][0]
+            temp = previsao_hoje['main']['temp']
+            descricao = previsao_hoje['weather'][0]['description']
+            return f"A previsão para hoje em {cidade_api} é de {descricao}, com temperatura de {temp:.0f} graus."
 
-            dados = response.json()
-            nome_cidade = dados['name']
-            descricao_clima = dados['weather'][0]['description']
-            temp_atual = dados['main']['temp']
-            sensacao_termica = dados['main']['feels_like']
-            temp_min = dados['main']['temp_min']
-            temp_max = dados['main']['temp_max']
-            umidade = dados['main']['humidity']
+        elif periodo == "amanha":
+            amanha = (datetime.now() + timedelta(days=1)).date()
+            for previsao in data['list']:
+                data_previsao = datetime.fromtimestamp(previsao['dt']).date()
+                if data_previsao == amanha:
+                    temp_max = previsao['main']['temp_max']
+                    descricao = previsao['weather'][0]['description']
+                    return f"Amanhã em {cidade_api}, a previsão é de {descricao}, com máxima de {temp_max:.0f} graus."
+            return f"Não encontrei uma previsão específica para amanhã em {cidade_api}."
 
-            return (
-                f"A previsão do tempo para {nome_cidade} agora é de {descricao_clima}, "
-                f"com temperatura atual de {temp_atual:.0f} graus e sensação térmica de {sensacao_termica:.0f} graus. "
-                f"A mínima para hoje é de {temp_min:.0f} e a máxima de {temp_max:.0f} graus. "
-                f"A umidade do ar está em {umidade}%."
-            )
+        elif periodo == "semana":
+            resumo_semana = {}
+            for previsao in data['list']:
+                data_previsao = datetime.fromtimestamp(previsao['dt']).strftime('%A')
+                if data_previsao not in resumo_semana:
+                    resumo_semana[data_previsao] = {
+                        'temp_max': previsao['main']['temp_max'],
+                        'descricao': previsao['weather'][0]['description']
+                    }
+            resposta = f"Resumo da previsão para a semana em {cidade_api}: "
+            for dia, valores in resumo_semana.items():
+                resposta += f"{dia}, {valores['descricao']} com máxima de {valores['temp_max']:.0f} graus. "
+            return resposta
 
-        elif periodo in ["amanha", "semana"]:
-            print(f"🌦️  Buscando previsão futura para '{periodo}' em: {cidade}")
-            url = f"https://api.openweathermap.org/data/2.5/forecast?q={cidade}&appid={api_key}&units=metric&lang=pt_br"
-            response = requests.get(url)
-            if response.status_code != 200:
-                dados_erro = response.json()
-                return f"Desculpe, não consegui encontrar a previsão futura para {cidade}. Erro: {dados_erro.get('message', 'desconhecido')}."
-
-            dados = response.json()
-            nome_cidade = dados['city']['name']
-            lista_previsoes = dados['list']
-
-            if periodo == "amanha":
-                amanha = (datetime.now() + timedelta(days=1)).date()
-                for previsao in lista_previsoes:
-                    data_previsao = datetime.fromtimestamp(previsao['dt']).date()
-                    if data_previsao == amanha:
-                        # Pega a previsão por volta do meio-dia para ser mais representativa
-                        if "12:00:00" in previsao['dt_txt']:
-                            descricao = previsao['weather'][0]['description']
-                            temp = previsao['main']['temp']
-                            return f"Amanhã em {nome_cidade}, a previsão é de {descricao} com temperatura por volta de {temp:.0f} graus."
-                return f"Não encontrei uma previsão específica para amanhã em {nome_cidade}."
-
-            elif periodo == "semana":
-                dias_semana = {}
-                for previsao in lista_previsoes:
-                    data = datetime.fromtimestamp(previsao['dt']).strftime('%Y-%m-%d')
-                    if data not in dias_semana:
-                        dias_semana[data] = {'min': [], 'max': [], 'desc': []}
-                    dias_semana[data]['min'].append(previsao['main']['temp_min'])
-                    dias_semana[data]['max'].append(previsao['main']['temp_max'])
-                    dias_semana[data]['desc'].append(previsao['weather'][0]['description'])
-
-                resposta = f"Aqui está a previsão para os próximos dias em {nome_cidade}... "
-                for data_str, valores in list(dias_semana.items())[:5]:
-                    data_obj = datetime.strptime(data_str, '%Y-%m-%d')
-                    nome_dia = data_obj.strftime("%A").replace("-feira", "")
-                    temp_min_dia = min(valores['min'])
-                    temp_max_dia = max(valores['max'])
-                    desc_comum = max(set(valores['desc']), key=valores['desc'].count)
-                    resposta += f"Para {nome_dia}: a previsão é de {desc_comum}, com mínima de {temp_min_dia:.0f} e máxima de {temp_max_dia:.0f} graus... "
-                return resposta
-
+    except requests.exceptions.HTTPError as http_err:
+        if http_err.response.status_code == 401:
+            print("Erro 401: A chave da API é inválida ou não está ativa. Verifique o .env e a URL (HTTPS).")
+            return "Desculpe, minha chave de acesso ao serviço de clima parece estar inválida."
+        print(f"Erro HTTP: {http_err}")
+        return "Desculpe, o serviço de meteorologia não está respondendo como esperado."
     except requests.exceptions.RequestException as e:
-        return f"Desculpe, estou sem conexão para verificar a previsão do tempo. Erro: {e}"
+        print(f"Erro de conexão com a API de clima: {e}")
+        return "Desculpe, estou com problemas para me conectar ao serviço de meteorologia."
     except Exception as e:
-        return f"Ocorreu um erro inesperado ao buscar a previsão do tempo. Erro: {e}"
-
-    return "Não consegui obter a previsão."
+        print(f"Erro inesperado ao processar previsão do tempo: {e}")
+        return "Ocorreu um erro inesperado ao buscar a previsão do tempo."
 
 
 # --- SUAS FUNÇÕES ORIGINAIS (MANTIDAS) ---
@@ -280,9 +277,9 @@ def encontrar_app_por_nome(nome_falado, atalhos):
 def encontrar_e_abrir_pasta(nome_pasta_falado):
     print(f"🔎 Procurando pela pasta '{nome_pasta_falado}'...")
     diretorios_base = [
-        os.path.expanduser(''), os.path.join(os.path.expanduser(''), 'Desktop'),
-        os.path.join(os.path.expanduser(''), 'Documents'), os.path.join(os.path.expanduser(''), 'Downloads'),
-        os.path.join(os.path.expanduser(''), 'Pictures'), os.path.join(os.path.expanduser(''), 'Music'),
+        os.path.expanduser('~'), os.path.join(os.path.expanduser('~'), 'Desktop'),
+        os.path.join(os.path.expanduser('~'), 'Documents'), os.path.join(os.path.expanduser('~'), 'Downloads'),
+        os.path.join(os.path.expanduser('~'), 'Pictures'), os.path.join(os.path.expanduser('~'), 'Music'),
         os.path.join(os.path.expanduser('~'), 'Videos'),
     ]
     drives = [f"{chr(drive)}:\\" for drive in range(ord('A'), ord('Z') + 1) if os.path.exists(f"{chr(drive)}:")]
@@ -290,7 +287,9 @@ def encontrar_e_abrir_pasta(nome_pasta_falado):
     melhor_match = {'caminho': None, 'score': 0.0}
     for base in set(diretorios_base):
         for raiz, pastas, arquivos in os.walk(base):
-            if raiz.count(os.sep) - base.count(os.sep) > 3: continue
+            # Limita a profundidade da busca para evitar lentidão
+            if raiz.count(os.sep) - base.count(os.sep) > 4:
+                continue
             for pasta in pastas:
                 score = SequenceMatcher(None, nome_pasta_falado.lower(), pasta.lower()).ratio()
                 if score > melhor_match['score']:
@@ -329,12 +328,16 @@ def obter_cotacao_acao(nome_ativo):
         preco_atual = dados['Close'].iloc[-1]
         nome_completo = ativo.info.get('longName', nome_ativo.capitalize())
 
-        if ".SA" in ticker:
-            moeda = "reais"
+        # Correção para buscar a moeda correta
+        moeda = ativo.info.get('currency', 'USD').upper()
+        if moeda == 'BRL':
+            moeda_falada = "reais"
+        elif moeda == 'USD':
+            moeda_falada = "dólares"
         else:
-            moeda = "dólares"
+            moeda_falada = moeda
 
-        resposta = f"O valor atual de {nome_completo} é de {preco_atual:.2f} {moeda}."
+        resposta = f"O valor atual de {nome_completo} é de {preco_atual:.2f} {moeda_falada}."
         return resposta
 
     except Exception as e:
@@ -349,7 +352,8 @@ def obter_noticias_do_dia():
         if not feed.entries:
             return "Desculpe, não consegui carregar as notícias no momento."
 
-        manchetes = [entrada.title for entrada in feed.entries[:3]]
+        # Limpa o título para remover o nome do jornal
+        manchetes = [entrada.title.split(',')[0].strip() for entrada in feed.entries[:3]]
         resposta = "Claro, aqui estão as principais manchetes do G1: ... " + " ... ".join(manchetes)
         return resposta
 

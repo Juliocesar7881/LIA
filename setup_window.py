@@ -4,6 +4,9 @@ from config_manager import carregar_config, salvar_config
 import webbrowser
 import os
 import json
+from PIL import Image, ImageTk  # <-- Para lidar com o ícone
+import ctypes
+from ctypes import windll
 
 
 class JanelaSetup(customtkinter.CTkToplevel):
@@ -25,35 +28,17 @@ class JanelaSetup(customtkinter.CTkToplevel):
         self.COR_ACCENT = "#0078D7"
 
         self.title("Bem-vindo(a) à LIA!")
-        self.geometry("500x580")  # MODIFICADO: Altura ajustada para o novo item
-
-        try:
-            # TESTE COM CAMINHO ABSOLUTO E EXPLÍCITO
-            path_absoluto = r"C:\Users\Luchini\PycharmProjects\Lisa\assets\icon_blue.ico"
-
-            print("\n--- INICIANDO TESTE DE CAMINHO ABSOLUTO ---")
-            print(f"Tentando carregar o ícone de: '{path_absoluto}'")
-
-            # Verificação crucial: o arquivo existe neste caminho exato?
-            if os.path.exists(path_absoluto):
-                print("✅ Arquivo encontrado no caminho absoluto.")
-                # Tentativa de carregar o ícone
-                self.iconbitmap(path_absoluto)
-                print("✅ Comando self.iconbitmap() executado. Verifique a janela.")
-            else:
-                print(
-                    "❌ ERRO CRÍTICO: O arquivo NÃO foi encontrado no caminho absoluto. Verifique se o caminho está 100% correto.")
-            print("--- FIM DO TESTE DE CAMINHO ABSOLUTO ---\n")
-
-        except Exception as e:
-            # Se o arquivo existe mas dá erro ao carregar, o problema é o formato do arquivo.
-            print(f"❌ ERRO AO CARREGAR O ÍCONE: {e}")
-            print("Isso geralmente significa que o arquivo .ico não é válido ou está corrompido.")
-
+        self.geometry("500x580")
         self.resizable(False, False)
+
+        # Referência da imagem do ícone
+        self.icon_photo = None
+
         self.attributes('-topmost', True)
         self.lift()
-        self.after(50, self.centralizar_janela)
+
+        # Correção de timing → centralização + ícone
+        self.after(100, self.finalizar_configuracao_janela)
 
         self.frame = customtkinter.CTkFrame(self, corner_radius=10)
         self.frame.pack(fill="both", expand=True, padx=20, pady=20)
@@ -93,7 +78,6 @@ class JanelaSetup(customtkinter.CTkToplevel):
         self.label_slider = customtkinter.CTkLabel(self.frame, text="Equilibrada (50%)", font=self.FONT_PEQUENA)
         self.label_slider.pack(pady=(0, 20))
 
-        # Frame para organizar as caixas de seleção
         checkbox_frame = customtkinter.CTkFrame(self.frame, fg_color="transparent")
         checkbox_frame.pack(pady=10, fill="x", padx=35)
 
@@ -103,7 +87,6 @@ class JanelaSetup(customtkinter.CTkToplevel):
                                                   font=self.FONT_NORMAL, fg_color=self.COR_ACCENT)
         lembrar_check.pack(anchor="w", side="left")
 
-        # NOVO: Caixa de seleção para inicializar com o sistema
         self.iniciar_sistema_var = customtkinter.BooleanVar(value=False)
         iniciar_sistema_check = customtkinter.CTkCheckBox(checkbox_frame, text="Inicializar com o sistema",
                                                           variable=self.iniciar_sistema_var,
@@ -126,6 +109,45 @@ class JanelaSetup(customtkinter.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         self.bind("<FocusOut>", self._on_window_click, add="+")
         self.cidade_entry.bind("<FocusOut>", self._on_window_click, add="+")
+
+    def finalizar_configuracao_janela(self):
+        """Centraliza a janela e define o ícone customizado."""
+        self.update_idletasks()
+        x_pos = (self.winfo_screenwidth() - self.winfo_width()) // 2
+        y_pos = (self.winfo_screenheight() - self.winfo_height()) // 2
+        self.geometry(f"+{x_pos}+{y_pos}")
+
+        # agenda para garantir que o CustomTkinter não sobrescreva
+        self.after(200, self._forcar_icone)
+
+    def _forcar_icone(self):
+        """Aplica o ícone blue_icon.ico definitivamente."""
+        try:
+            base_path = os.path.dirname(__file__)
+            icon_path = os.path.join(base_path, "assets", "icon_blue.ico")
+
+            if os.path.exists(icon_path):
+                # Windows e fallback cross-platform
+                self.iconbitmap(icon_path)
+
+                # Fallback para sistemas que usam iconphoto
+                image = Image.open(icon_path)
+                self.icon_photo = ImageTk.PhotoImage(image)
+                self.iconphoto(True, self.icon_photo)
+
+                # Forçar via API nativa do Windows
+                hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+                hicon = windll.user32.LoadImageW(
+                    0, icon_path, 1, 0, 0, 0x00000010
+                )
+                windll.user32.SendMessageW(hwnd, 0x80, 0, hicon)  # ícone grande
+                windll.user32.SendMessageW(hwnd, 0x80, 1, hicon)  # ícone pequeno
+
+                print("✅ Ícone customizado aplicado com sucesso!")
+            else:
+                print(f"Aviso: Ícone não encontrado em {icon_path}")
+        except Exception as e:
+            print(f"Aviso: Não foi possível aplicar o ícone customizado. Erro: {e}")
 
     def _on_window_click(self, event):
         self.after(100, self._check_focus)
@@ -172,12 +194,9 @@ class JanelaSetup(customtkinter.CTkToplevel):
         sugestoes = [c for c in self.cidades_lista if c.lower().startswith(texto_digitado)]
 
         if sugestoes:
-            container_width = self.cidade_entry.winfo_width()
-            label_width = container_width - 80
-
             for i, nome_cidade in enumerate(sugestoes[:10]):
-                label = customtkinter.CTkLabel(self.sugestoes_container, text=nome_cidade, width=label_width,
-                                               font=self.FONT_NORMAL, anchor="w")
+                label = customtkinter.CTkLabel(self.sugestoes_container, text=nome_cidade, font=self.FONT_NORMAL,
+                                               anchor="w")
                 label.pack(fill="x", padx=10, pady=4)
                 label.bind("<Button-1>", lambda event, cidade=nome_cidade: self._selecionar_cidade(cidade))
 
@@ -186,7 +205,7 @@ class JanelaSetup(customtkinter.CTkToplevel):
                     linha.pack(fill="x", padx=5)
 
             if not self.sugestoes_container.winfo_ismapped():
-                self.sugestoes_container.pack(padx=20, pady=2, after=self.cidade_entry, anchor="w")
+                self.sugestoes_container.pack(fill="x", padx=20, pady=2, after=self.cidade_entry)
         else:
             self.sugestoes_container.pack_forget()
 
@@ -196,13 +215,7 @@ class JanelaSetup(customtkinter.CTkToplevel):
         self.sugestoes_container.pack_forget()
         self.cidade_entry.focus()
         self.cidade_entry.icursor(END)
-        self.after(100, lambda: setattr(self, 'processando_selecao', False))
-
-    def centralizar_janela(self):
-        self.update_idletasks()
-        x_pos = (self.winfo_screenwidth() - self.winfo_width()) // 2
-        y_pos = (self.winfo_screenheight() - self.winfo_height()) // 2
-        self.geometry(f"+{x_pos}+{y_pos}")
+        self.after(50, lambda: setattr(self, 'processando_selecao', False))
 
     def atualizar_personalidade_label(self, valor):
         valor_int = int(float(valor))
@@ -219,8 +232,6 @@ class JanelaSetup(customtkinter.CTkToplevel):
         self.attributes('-topmost', False)
         nome = self.nome_entry.get().strip()
         cidade = self.cidade_entry.get().strip()
-
-        # NOVO: Obtém o valor da nova caixa de seleção
         iniciar_com_sistema = self.iniciar_sistema_var.get()
 
         if not nome:
@@ -236,17 +247,9 @@ class JanelaSetup(customtkinter.CTkToplevel):
             return
 
         if self.lembrar_var.get():
-            # MODIFICADO: Passa o novo valor para a função de salvar
-            # Lembre-se de atualizar a função 'salvar_config' para aceitar este novo parâmetro
             salvar_config(nome, self.humor_var.get(), cidade, iniciar_com_sistema)
 
-        # NOVO: Aqui você adicionaria a lógica para configurar a inicialização com o sistema
-        if iniciar_com_sistema:
-            # Exemplo: self.configurar_inicializacao_auto(ativar=True)
-            print("Configurando para iniciar com o sistema...")
-        else:
-            # Exemplo: self.configurar_inicializacao_auto(ativar=False)
-            print("Removendo da inicialização com o sistema...")
+        print(f"Configurando para iniciar com o sistema: {iniciar_com_sistema}")
 
         if self.callback:
             self.callback()

@@ -222,21 +222,47 @@ async def processar_comando(comando):
         await falar("Você quer abrir as configurações do Windows ou da assistente?")
         return
 
+        # No arquivo: main.py
+
+        # No arquivo: main.py
+
     gatilhos_clima = ["previsão do tempo", "como está o tempo", "qual o clima", "temperatura em"]
     for gatilho in gatilhos_clima:
         if gatilho in comando:
             periodo = "hoje"
+
+            # --- CORREÇÃO APLICADA AQUI ---
+            # Lógica aprimorada para detectar o período
+
+            # Palavras-chave completas para "semana"
+            periodos_semana = ["essa semana", "nesta semana", "dessa semana", "desta semana"]
+            # Finais de frase incompletos que também indicam "semana"
+            terminos_semana = [" para essa", " dessa", " para esta", " desta"]
+
             if "amanhã" in comando:
                 periodo = "amanha"
-            elif "essa semana" in comando or "nesta semana" in comando:
+            # Verifica tanto as palavras-chave completas quanto os finais de frase
+            elif any(termo in comando for termo in periodos_semana) or any(
+                    comando.endswith(termo) for termo in terminos_semana):
                 periodo = "semana"
+            # --- FIM DA CORREÇÃO ---
 
-            comando_sem_gatilho = comando.split(gatilho, 1)[-1].strip()
-            comando_sem_periodo = re.sub(
-                r'para (hoje|amanhã|essa semana|nesta semana)|(hoje|amanhã|essa semana|nesta semana)', '',
-                comando_sem_gatilho, flags=re.IGNORECASE).strip()
+            # Lógica robusta para extrair o nome da cidade (mantida da correção anterior)
+            period_keywords = [
+                'para hoje', 'hoje', 'para amanhã', 'amanhã',
+                'para essa semana', 'essa semana', 'para nesta semana', 'nesta semana',
+                'para dessa semana', 'dessa semana', 'para desta semana', 'desta semana'
+            ]
+            temp_comando = comando.replace(gatilho, '', 1)
+            for keyword in period_keywords:
+                temp_comando = re.sub(r'\b' + re.escape(keyword) + r'\b', '', temp_comando, flags=re.IGNORECASE)
 
-            cidade_extraida = comando_sem_periodo.replace("em", "").strip()
+            # Adicionalmente, remove os finais de frase para limpar o nome da cidade
+            for termino in terminos_semana:
+                if temp_comando.endswith(termino):
+                    temp_comando = temp_comando[:-len(termino)]
+
+            cidade_extraida = temp_comando.replace("em", "").strip()
 
             cidade_padrao = config.get('cidade_padrao', 'São Paulo')
             if not cidade_extraida:
@@ -248,7 +274,8 @@ async def processar_comando(comando):
             else:
                 cidade = cidade_extraida
 
-            adicionar_memoria("acao", f"Usuário pediu previsão do tempo para '{cidade}' para o período '{periodo}'.")
+            adicionar_memoria("acao",
+                              f"Usuário pediu previsão do tempo para '{cidade}' para o período '{periodo}'.")
             previsao = obter_previsao_tempo(cidade, periodo)
             ultima_resposta_gpt = previsao
             await falar(previsao)

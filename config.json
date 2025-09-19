@@ -1,5 +1,6 @@
 {
-    "user_name": "zicado",
+    "user_name": "nome",
     "lia_personality": 50,
-    "cidade_padrao": "Massaranduba, SC"
+    "cidade_padrao": "Jaraguá do Sul, SC",
+    "iniciar_com_windows": false
 }
