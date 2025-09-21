@@ -16,6 +16,7 @@ from config_manager import carregar_config
 from setup_window import criar_janela_setup
 from memory_manager import init_database, adicionar_memoria, limpar_memorias_antigas, gerar_resumo_da_memoria
 from status_indicator import StatusIndicator
+from smart_device_control import encontrar_id_dispositivo, controlar_tomada
 from voice_control import falar, parar_fala, recognizer, mic, falar_rapido, tts_is_active
 from screen_control import (
     executar_acao_na_tela,
@@ -263,6 +264,32 @@ async def processar_comando(comando):
             await falar(previsao)
             return
 
+    # --- NOVO BLOCO DE CÓDIGO PARA A TOMADA INTELIGENTE ---
+    gatilhos_tomada = ["tomada", "luz"]
+    if any(gatilho in comando for gatilho in gatilhos_tomada):
+        device_id = encontrar_id_dispositivo("tomada")
+
+        if not device_id:
+            await falar("Desculpe, não encontrei nenhuma tomada inteligente configurada na sua conta.")
+            return
+
+        if any(termo in comando for termo in ["ligar", "acender"]):
+            if controlar_tomada(device_id, ligar=True):
+                await falar("Ok, liguei a tomada.")
+            else:
+                await falar("Desculpe, não consegui ligar a tomada.")
+
+        elif any(termo in comando for termo in ["desligar", "apagar"]):
+            if controlar_tomada(device_id, ligar=False):
+                await falar("Ok, desliguei a tomada.")
+            else:
+                await falar("Desculpe, não consegui desligar a tomada.")
+        else:
+            await falar("Você quer ligar ou desligar a tomada?")
+
+        return
+    # --- FIM DO BLOCO DA TOMADA INTELIGENTE ---
+
     gatilhos_alterar_codigo = ["altere o código", "alterar o código", "modifique o código", "modifica o código",
                                "adicione ao código"]
     for gatilho in gatilhos_alterar_codigo:
@@ -431,19 +458,15 @@ async def processar_comando(comando):
         await cancelar_desligamento();
         return
 
-    # --- CORREÇÃO DE ORDEM ---
-    # O bloco "abrir prints" foi movido para ANTES do bloco "tirar print" para evitar conflito de palavras-chave.
     gatilhos_abrir_prints = ["abrir prints", "abrir prin", "abrir print", "mostrar prints", "mostrar prin",
                              "mostrar print", "pasta de print", "pasta de prin", "pasta de prints", "último print",
                              "último prin"]
     if any(gatilho in comando for gatilho in gatilhos_abrir_prints):
         if abrir_pasta_prints():
-            # A resposta foi alterada para "Aberto."
             await falar("Aberto.")
         else:
             await falar("Ainda não tirei nenhum print para mostrar.")
         return
-    # --- FIM DA CORREÇÃO ---
 
     gatilhos_print = ["tirar print", "tira print", "tira prin", "printar a tela", "printa a tela", "print",
                       "capturar tela",
