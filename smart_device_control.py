@@ -1,79 +1,101 @@
-# smart_device_control.py
-
+# smart_device_control.py (versão corrigida)
+import tinytuya
 import os
+import traceback
 from dotenv import load_dotenv
-from tuya_connector import TuyaOpenAPI
 
-# Carrega as variáveis do arquivo .env
 load_dotenv()
 
-# Pega as credenciais do ambiente
-ACCESS_ID = os.getenv("TUYA_API_KEY")
-ACCESS_SECRET = os.getenv("TUYA_API_SECRET")
-API_ENDPOINT = "https://openapi.tuyaus.com"
+API_REGION = "us"
+API_KEY = os.getenv("TUYA_API_KEY")
+API_SECRET = os.getenv("TUYA_API_SECRET")
 
-# Verifica se as credenciais foram carregadas
-if not ACCESS_ID or not ACCESS_SECRET:
-    raise ValueError("Credenciais TUYA_API_KEY e TUYA_API_SECRET não encontradas no arquivo .env")
+print("--- Módulo de Controle de Dispositivos Tuya Carregado ---")
 
-# Inicializa a conexão com a API
-openapi = TuyaOpenAPI(API_ENDPOINT, ACCESS_ID, ACCESS_SECRET)
-openapi.connect()
-
-
-def encontrar_id_dispositivo(nome_dispositivo="tomada"):
-    """
-    Busca na nuvem da Tuya por um dispositivo que contenha o nome fornecido.
-    Retorna o ID do primeiro dispositivo encontrado.
-    """
-    try:
-        # Pega a lista de todos os dispositivos vinculados à sua conta
-        response = openapi.get("/v1.0/devices")
-
-        if not response.get('success'):
-            print(f"❌ Erro ao listar dispositivos: {response.get('msg')}")
-            return None
-
-        dispositivos = response['result']
-
-        # Procura pelo dispositivo que contenha o nome (ex: "tomada")
-        for dispositivo in dispositivos:
-            if nome_dispositivo.lower() in dispositivo.get('name', '').lower():
-                device_id = dispositivo['id']
-                print(f"✅ Dispositivo encontrado: '{dispositivo['name']}' (ID: {device_id})")
-                return device_id
-
-        print(f"❌ Nenhum dispositivo com o nome '{nome_dispositivo}' foi encontrado.")
-        return None
-
-    except Exception as e:
-        print(f"🤯 Erro ao tentar encontrar o ID do dispositivo: {e}")
-        return None
+try:
+    cloud = tinytuya.Cloud(
+        apiRegion=API_REGION,
+        apiKey=API_KEY,
+        apiSecret=API_SECRET
+    )
+    print("✅ Conexão com a nuvem Tuya estabelecida com sucesso.")
+except Exception as e:
+    cloud = None
+    print(f"❌ ERRO FATAL ao conectar na nuvem Tuya. Erro: {e}")
 
 
-def controlar_tomada(device_id, ligar: bool):
-    """
-    Envia um comando para ligar ou desligar um dispositivo específico.
+def encontrar_e_controlar(nome_dispositivo, comando):
+    if not cloud:
+        return "Desculpe, a conexão com o sistema de dispositivos falhou na inicialização."
 
-    Args:
-        device_id (str): O ID do dispositivo a ser controlado.
-        ligar (bool): True para ligar, False para desligar.
-    """
-    if not device_id:
-        return False
+    comando_limpo = comando.lower().strip()
+    print(f"DEBUG: Comando recebido pela função: '{comando_limpo}'")
+
+    if comando_limpo not in ["ligar", "desligar", "status"]:
+        return f"Comando '{comando_limpo}' não reconhecido. Use 'ligar', 'desligar' ou 'status'."
 
     try:
-        commands = {'commands': [{'code': 'switch_1', 'value': ligar}]}
-        response = openapi.post(f'/v1.0/devices/{device_id}/commands', commands)
+        print("Buscando dispositivos na sua conta...")
+        devices = cloud.getdevices()
 
-        if response.get('success', False):
-            acao = "ligada" if ligar else "desligada"
-            print(f"✅ Tomada {acao} com sucesso!")
-            return True
+        if not isinstance(devices, list) or not devices:
+            return "Nenhum dispositivo foi encontrado na sua conta."
+
+        target_device = None
+        for device in devices:
+            if nome_dispositivo.lower() in device.get('name', '').lower():
+                target_device = device
+                break
+
+        if not target_device:
+            return f"Desculpe, não encontrei o dispositivo '{nome_dispositivo}'."
+
+        device_id = target_device['id']
+        print(f"✅ Dispositivo encontrado: '{target_device['name']}' (ID: {device_id})")
+
+        # --- Pegando o estado atual ---
+        status_data = cloud.getstatus(device_id)
+        estado_atual_ligada = None
+
+        if status_data and isinstance(status_data.get('result'), list):
+            for item in status_data['result']:
+                if item.get('code') == 'switch_1':
+                    estado_atual_ligada = item.get('value')
+                    break
+
+        if estado_atual_ligada is None:
+            return f"Não consegui interpretar o status da {nome_dispositivo}."
+
+        print(f"Status atual: {'Ligada' if estado_atual_ligada else 'Desligada'}")
+
+        # --- Se for apenas status ---
+        if comando_limpo == "status":
+            return f"A {nome_dispositivo} está {'ligada' if estado_atual_ligada else 'desligada'}."
+
+        # --- Lógica correta de ligar/desligar ---
+        if comando_limpo == "ligar":
+            if estado_atual_ligada:
+                return f"A {nome_dispositivo} já está ligada."
+            valor = True
+            acao_realizada = "ligada"
+
+        elif comando_limpo == "desligar":
+            if not estado_atual_ligada:
+                return f"A {nome_dispositivo} já está desligada."
+            valor = False
+            acao_realizada = "desligada"
+
+        print(f"Enviando comando para {acao_realizada.upper()} o ID: {device_id}")
+        commands = {'commands': [{'code': 'switch_1', 'value': valor}]}
+        result = cloud.sendcommand(device_id, commands)
+
+        print(f"Resposta do comando: {result}")
+        if result and result.get('success'):
+            return f"Ok, a {nome_dispositivo} foi {acao_realizada}."
         else:
-            print(f"❌ Falha ao enviar comando para o dispositivo {device_id}. Resposta: {response}")
-            return False
+            return f"Houve uma falha ao tentar controlar a {nome_dispositivo}."
 
     except Exception as e:
-        print(f"🤯 Erro ao controlar a tomada com ID {device_id}: {e}")
-        return False
+        print(f"❌ ERRO INESPERADO: {e}")
+        traceback.print_exc()
+        return "Ocorreu um erro inesperado ao me comunicar com o dispositivo."

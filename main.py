@@ -16,7 +16,7 @@ from config_manager import carregar_config
 from setup_window import criar_janela_setup
 from memory_manager import init_database, adicionar_memoria, limpar_memorias_antigas, gerar_resumo_da_memoria
 from status_indicator import StatusIndicator
-from smart_device_control import encontrar_id_dispositivo, controlar_tomada
+# A importação das funções antigas da tomada foi removida, pois não são mais necessárias aqui.
 from voice_control import falar, parar_fala, recognizer, mic, falar_rapido, tts_is_active
 from screen_control import (
     executar_acao_na_tela,
@@ -264,31 +264,35 @@ async def processar_comando(comando):
             await falar(previsao)
             return
 
-    # --- NOVO BLOCO DE CÓDIGO PARA A TOMADA INTELIGENTE ---
-    gatilhos_tomada = ["tomada", "luz"]
-    if any(gatilho in comando for gatilho in gatilhos_tomada):
-        device_id = encontrar_id_dispositivo("tomada")
+    # --- BLOCO CORRIGIDO E ROBUSTO PARA A TOMADA INTELIGENTE ---
+    gatilhos_dispositivo = ["tomada", "luz"]
+    comando_lower = comando.lower()
 
-        if not device_id:
-            await falar("Desculpe, não encontrei nenhuma tomada inteligente configurada na sua conta.")
-            return
+    if any(dispositivo in comando_lower for dispositivo in gatilhos_dispositivo):
+        acao = None  # Garante que a variável 'acao' seja limpa a cada comando
 
-        if any(termo in comando for termo in ["ligar", "acender"]):
-            if controlar_tomada(device_id, ligar=True):
-                await falar("Ok, liguei a tomada.")
-            else:
-                await falar("Desculpe, não consegui ligar a tomada.")
+        # Verifica explicitamente a intenção do usuário
+        if any(termo in comando_lower for termo in ["desligar", "apagar", "desativar"]):
+            acao = "desligar"
+        elif any(termo in comando_lower for termo in ["ligar", "acender", "ativar"]):
+            acao = "ligar"
 
-        elif any(termo in comando for termo in ["desligar", "apagar"]):
-            if controlar_tomada(device_id, ligar=False):
-                await falar("Ok, desliguei a tomada.")
-            else:
-                await falar("Desculpe, não consegui desligar a tomada.")
+        # Se uma ação foi determinada, executa e LOGA para debug
+        if acao:
+            # Esta linha é crucial para vermos o que o main.py decidiu
+            print(f"DEBUG [main.py]: Intenção detectada: '{acao}'. Enviando para o controlador...")
+            try:
+                from smart_device_control import encontrar_e_controlar
+                resposta = encontrar_e_controlar("tomada", acao)
+                await falar(resposta)
+            except Exception as e:
+                print(f"Erro ao chamar o controle de dispositivo: {e}")
+                await falar("Desculpe, tive um problema ao tentar controlar a tomada.")
         else:
+            # Caso a palavra "tomada" seja dita sem "ligar" ou "desligar"
             await falar("Você quer ligar ou desligar a tomada?")
 
-        return
-    # --- FIM DO BLOCO DA TOMADA INTELIGENTE ---
+        return  # Essencial para não deixar o comando ser processado pelo GPT
 
     gatilhos_alterar_codigo = ["altere o código", "alterar o código", "modifique o código", "modifica o código",
                                "adicione ao código"]
