@@ -48,6 +48,7 @@ from file_converter import converter_video_para_audio
 from youtube_downloader import baixar_media_youtube
 from agenda_control import criar_alarme, listar_alarmes, remover_alarme
 from code_writer import gerar_codigo_e_abrir_no_navegador, alterar_codigo_e_abrir_no_navegador
+import planner # <-- ADICIONADO PARA O CÉREBRO INTELIGENTE
 
 # --- Configurações e Variáveis Globais ---
 config = None
@@ -86,7 +87,7 @@ def agendar_recarregamento():
 async def abrir_janela_configuracoes_lia():
     """Função centralizada para abrir a janela de configurações da LIA."""
     adicionar_memoria("sistema", "Usuário pediu para abrir as configurações da LIA.")
-    await falar("Ok, abrindo as minhas configurações. Faça as suas alterações e clique em 'Concluir' para salvar.")
+    await falar("Faça as suas alterações e clique em 'Concluir' para salvar.")
     if indicator_ui:
         indicator_ui.schedule_main_thread_task(lambda: criar_janela_setup(callback=agendar_recarregamento))
 
@@ -217,6 +218,7 @@ async def processar_comando(comando):
     ]
     if any(palavra in comando for palavra in palavras_de_interrupcao):
         adicionar_memoria("interrupcao", "Comando de silêncio recebido.")
+        parar_fala()
         return
 
     gatilhos_config = ["configurar lia", "configurações", "abrir configurações", "mudar configuração", "configurar"]
@@ -786,6 +788,21 @@ async def processar_comando(comando):
         else:
             await falar("Não há nenhuma resposta recente para anotar.")
         return
+
+    # --- NOVO BLOCO PARA O PLANNER ---
+    gatilhos_planner = ["tarefa", "execute", "executar"]
+    for gatilho in gatilhos_planner:
+        if comando.startswith(gatilho):
+            intencao = comando.replace(gatilho, "", 1).strip()
+            if intencao:
+                asyncio.run_coroutine_threadsafe(
+                    planner.processar_intencao_complexa(intencao, config),
+                    loop_principal
+                )
+            else:
+                await falar("Ok, qual tarefa devo executar?")
+            return
+    # --- FIM DO NOVO BLOCO ---
 
     resposta = await perguntar_ao_gpt(comando, config.get('lia_personality', 50),
                                       contexto_memoria=resumo_memoria_principal)

@@ -1,31 +1,34 @@
-# Arquivo requirements.txt atualizado para a versão mais recente da LISA
-
-# Reconhecimento e síntese de voz
+# --- Reconhecimento e Síntese de Voz ---
 speechrecognition
 pyaudio
 edge-tts
 openai-whisper
 
-# Automação de interface e controle
+# --- Inteligência Artificial e APIs ---
+google-generativeai==0.5.4  # <-- VERSÃO ESPECIFICADA AQUI
+python-dotenv
+requests
+yfinance
+feedparser
+
+# --- Automação e Controle de Interface ---
 pyautogui
 pywinauto
-
-# Interação com a área de transferência
 pyperclip
+pywin32
 
-# Para tocar os áudios de resposta
+# --- Processamento de Imagem e Visão ---
+Pillow
+pytesseract
+opencv-python
+
+# --- Interface Gráfica e Mídia ---
+customtkinter
 pygame
 
-# Conexão com a API da OpenAI
-openai
-
-# Visão computacional (OCR)
-pytesseract
-Pillow
-google-generativeai
-
-# Para conversão de arquivos
-moviepy==1.0.3
-
-# Para baixar do YouTube
+# --- Manipulação de Arquivos e Mídia ---
+moviepy
 yt-dlp
+
+# --- Controle de Dispositivos Inteligentes ---
+tinytuya

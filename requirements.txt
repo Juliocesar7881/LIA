@@ -1,0 +1,31 @@
+# Arquivo requirements.txt atualizado para a versão mais recente da LISA
+
+# Reconhecimento e síntese de voz
+speechrecognition
+pyaudio
+edge-tts
+openai-whisper
+
+# Automação de interface e controle
+pyautogui
+pywinauto
+
+# Interação com a área de transferência
+pyperclip
+
+# Para tocar os áudios de resposta
+pygame
+
+# Conexão com a API da OpenAI
+openai
+
+# Visão computacional (OCR)
+pytesseract
+Pillow
+google-generativeai
+
+# Para conversão de arquivos
+moviepy==1.0.3
+
+# Para baixar do YouTube
+yt-dlp

@@ -1,5 +1,3 @@
-# gpt_bridge.py
-
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -32,7 +30,6 @@ def _definir_personalidade(humor: int, contexto_memoria: str = "") -> str:
 
     instrucao_final = f"{instrucao_base} {personalidade}"
 
-    # Adiciona o contexto da memória, se existir
     if contexto_memoria:
         instrucao_final += f"\n\n--- CONTEXTO IMPORTANTE DE MEMÓRIAS RECENTES E FATOS SOBRE O USUÁRIO ---\n{contexto_memoria}\n--- FIM DO CONTEXTO ---"
 
@@ -47,8 +44,9 @@ async def perguntar_ao_gpt(mensagem_usuario, humor_lia: int, contexto_memoria: s
         f"🧠 Enviando prompt para o Google Gemini (Humor: {humor_lia}%, Contexto: {'Sim' if contexto_memoria else 'Não'})...")
     try:
         instrucao_sistema = _definir_personalidade(humor_lia, contexto_memoria)
+        # --- USANDO O MODELO CORRETO E MODERNO ---
         model = genai.GenerativeModel(
-            'gemini-1.5-flash-latest',
+            'models/gemini-2.5-flash',
             system_instruction=instrucao_sistema
         )
         response = await model.generate_content_async(mensagem_usuario)
@@ -72,7 +70,8 @@ async def summarize_memories_with_gpt(memories_text: str):
             "resumi-la em 2 ou 3 pontos chave e concisos. Extraia apenas as informações mais importantes sobre os interesses, "
             "o contexto e os fatos principais sobre o usuário. Responda apenas com os pontos chave, de forma impessoal."
         )
-        model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=system_instruction)
+        # --- USANDO O MODELO CORRETO E MODERNO ---
+        model = genai.GenerativeModel('models/gemini-2.5-flash', system_instruction=system_instruction)
         prompt = f"Analise e resuma os seguintes logs de interação com um usuário:\n\n{memories_text}"
         response = await model.generate_content_async(prompt)
 
@@ -96,7 +95,8 @@ async def extrair_fatos_da_memoria(memories_text: str):
             "Exemplos de informações RUINS para IGNORAR: '- O usuário pediu uma piada', '- O usuário perguntou as notícias'. "
             "Se nenhum fato permanente for encontrado, retorne uma resposta vazia."
         )
-        model = genai.GenerativeModel('gemini-1.5-flash-latest', system_instruction=system_instruction)
+        # --- USANDO O MODELO CORRETO E MODERNO ---
+        model = genai.GenerativeModel('models/gemini-2.5-flash', system_instruction=system_instruction)
         prompt = f"Analise os seguintes logs e extraia os fatos permanentes:\n\n{memories_text}"
         response = await model.generate_content_async(prompt)
 
@@ -118,7 +118,8 @@ async def descrever_imagem(caminho_imagem, prompt_texto):
     print(f"🖼️  Enviando imagem '{caminho_imagem}' para análise do Gemini...")
     try:
         img = PIL.Image.open(caminho_imagem)
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # --- USANDO O MODELO CORRETO E MODERNO ---
+        model = genai.GenerativeModel('models/gemini-2.5-flash')
         response = await model.generate_content_async([prompt_texto, img])
 
         if not response.parts:
@@ -141,8 +142,9 @@ async def gerar_codigo_com_gpt(prompt_usuario: str) -> str:
     """
     print("🤖 Enviando prompt de geração de código para o Google Gemini...")
     try:
+        # --- USANDO O MODELO CORRETO E MODERNO ---
         model = genai.GenerativeModel(
-            'gemini-1.5-flash-latest',
+            'models/gemini-2.5-flash',
             system_instruction=(
                 "Você é um assistente de programação especialista em Python. "
                 "Sua tarefa é gerar APENAS o código Python funcional que resolve o pedido do usuário. "
@@ -171,8 +173,9 @@ async def alterar_codigo_com_gpt(codigo_anterior: str, pedido_de_alteracao: str)
     """
     print("🤖 Enviando prompt de alteração de código para o Google Gemini...")
     try:
+        # --- USANDO O MODELO CORRETO E MODERNO ---
         model = genai.GenerativeModel(
-            'gemini-1.5-flash-latest',
+            'models/gemini-2.5-flash',
             system_instruction=(
                 "Você é um assistente de programação especialista em Python. "
                 "Sua tarefa é modificar o código Python fornecido de acordo com o pedido do usuário. "
